@@ -1,5 +1,5 @@
 ﻿import { useLiveQuery } from 'dexie-react-hooks'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { db } from '@/db'
 import { useCartStore } from '@/store/cartStore'
@@ -14,6 +14,7 @@ export function OrdersPage() {
   const [voidTargetId, setVoidTargetId] = useState<string | null>(null)
   const [voidReason, setVoidReason] = useState('')
   const [voidLoading, setVoidLoading] = useState(false)
+  const touchStartX = useRef(0)
   const navigate = useNavigate()
   const { loadOrder } = useCartStore()
   const { currentStaff } = useAuthStore()
@@ -61,42 +62,63 @@ export function OrdersPage() {
   }
 
   return (
-    <div className="p-5">
-      <div className="mb-5 flex items-center gap-2.5">
-        <ClipboardList className="h-5 w-5 text-blue-600" />
-        <div>
-          <h1 className="text-base font-bold text-zinc-900">Orders</h1>
-          <p className="text-xs text-zinc-500">{activeOrders?.length ?? 0} active</p>
+    <div className="flex h-full flex-col p-5">
+      {/* Header */}
+      <div className="mb-5 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <ClipboardList className="h-5 w-5 text-blue-600" />
+          <div>
+            <h1 className="text-base font-bold text-zinc-900">Orders</h1>
+            <p className="text-xs text-zinc-500">{activeOrders?.length ?? 0} active</p>
+          </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="mb-4 flex gap-1.5">
-        <button
-          onClick={() => setTab('takeaway')}
-          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${tab === 'takeaway' ? 'bg-blue-600 text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'}`}
-        >
-          Take Away
-          {takeawayOrders.length > 0 && (
-            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tab === 'takeaway' ? 'bg-white/25 text-white' : 'bg-blue-100 text-blue-700'}`}>
-              {takeawayOrders.length}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setTab('dine_in')}
-          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${tab === 'dine_in' ? 'bg-blue-600 text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'}`}
-        >
-          Dine In
-          {dineInOrders.length > 0 && (
-            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tab === 'dine_in' ? 'bg-white/25 text-white' : 'bg-blue-100 text-blue-700'}`}>
-              {dineInOrders.length}
-            </span>
-          )}
-        </button>
+      {/* Tabs — centered segmented control */}
+      <div className="mb-5 flex justify-center">
+        <div className="flex w-full max-w-sm rounded-xl bg-zinc-100 p-1">
+          <button
+            onClick={() => setTab('takeaway')}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-3 text-sm font-bold transition-all ${
+              tab === 'takeaway' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 active:bg-zinc-200'
+            }`}
+          >
+            Take Away
+            {takeawayOrders.length > 0 && (
+              <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
+                tab === 'takeaway' ? 'bg-blue-600 text-white' : 'bg-zinc-300 text-zinc-600'
+              }`}>
+                {takeawayOrders.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab('dine_in')}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-3 text-sm font-bold transition-all ${
+              tab === 'dine_in' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 active:bg-zinc-200'
+            }`}
+          >
+            Dine In
+            {dineInOrders.length > 0 && (
+              <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
+                tab === 'dine_in' ? 'bg-blue-600 text-white' : 'bg-zinc-300 text-zinc-600'
+              }`}>
+                {dineInOrders.length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* Orders grid */}
+      {/* Orders grid — swipeable */}
+      <div
+        className="flex-1 overflow-y-auto"
+        onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX }}
+        onTouchEnd={(e) => {
+          const diff = touchStartX.current - e.changedTouches[0].clientX
+          if (Math.abs(diff) > 50) setTab(diff > 0 ? 'dine_in' : 'takeaway')
+        }}
+      >
       {displayed.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
           <ClipboardList className="mb-2 h-12 w-12" />
@@ -166,6 +188,7 @@ export function OrdersPage() {
           })}
         </div>
       )}
+      </div>
 
       {/* Void Confirmation Modal */}
       {voidTargetId && (

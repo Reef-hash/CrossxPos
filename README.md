@@ -14,8 +14,10 @@ A modern, offline-first restaurant Point of Sale (POS) system built as a progres
 | Order management (void, discount, edit) | ✅ |
 | Menu management (categories, products, modifiers) | ✅ |
 | Staff management (roles, PIN) | ✅ |
+| Settings tabs (Profile, Printer, License) | ✅ |
 | Reports (date range, hourly chart, CSV export, sales by category) | ✅ |
 | Receipt & kitchen ticket printing (`window.print()`) | ✅ |
+| Station → printer routing setup (UI) | ✅ |
 | Offline-first (IndexedDB — no internet required) | ✅ |
 | License key system (HMAC-SHA256 offline verification) | ✅ |
 | Role-Based Access Control (RBAC) | ✅ |
@@ -95,7 +97,7 @@ Enable auto-print in **Settings → Receipt Printer / Kitchen Printer → Enable
 | 3 | RBAC + Waiter Tablet Mode + Order Management | ✅ Done |
 | 4 | Printer Integration | ✅ Done |
 | 5 | Reports Improvements | ✅ Done |
-| 6 | Menu Improvements (image upload, sort, sold out) | ⬜ Planned |
+| 6 | Menu Improvements (image upload, sort, sold out, duplicate) | ✅ Done |
 | 7 | Capacitor Setup (Android/iOS APK + TCP printing) | ⬜ Planned |
 | 8 | Multi-device Sync (waiter tablets real-time) | ⬜ Planned |
 
@@ -112,28 +114,4 @@ src/
 
 docs/             # Architecture, todo backlog, type reference
 scripts/          # License key generator CLI
-```
-
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```

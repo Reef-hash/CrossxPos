@@ -16,6 +16,9 @@ const defaultSettings: AppSettings = {
   receiptFooter: 'Thank you for dining with us!',
   receiptPrinter: { ip: '192.168.1.100', port: 9100, enabled: false },
   kitchenPrinter: { ip: '192.168.1.101', port: 9100, enabled: false },
+  kitchenStations: ['Kitchen', 'Bar'],
+  printerProfiles: [],
+  stationPrinterMap: {},
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -26,17 +29,19 @@ export const useSettingsStore = create<SettingsState>()(
       load: async () => {
         const row = await db.settings.get('app')
         if (row) {
-          const { id: _id, ...settings } = row
-          set({ settings: settings as AppSettings })
+          const { id: _id, ...rowSettings } = row
+          // Merge with defaults so new fields appear for existing installs
+          set({ settings: { ...defaultSettings, ...rowSettings } as AppSettings })
         }
       },
 
       save: async (partial) => {
+        let updated: AppSettings = defaultSettings
         set((state) => {
-          const updated = { ...state.settings, ...partial }
-          db.settings.put({ id: 'app', ...updated })
+          updated = { ...state.settings, ...partial }
           return { settings: updated }
         })
+        await db.settings.put({ id: 'app', ...updated })
       },
     }),
     { name: 'settings-store' }

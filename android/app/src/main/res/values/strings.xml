@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CrossxPOS</string>
+    <string name="title_activity_main">CrossxPOS</string>
+    <string name="package_name">com.crossxpos.app</string>
+    <string name="custom_url_scheme">com.crossxpos.app</string>
+</resources>

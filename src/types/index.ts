@@ -19,6 +19,7 @@ export interface Category {
   sortOrder: number
   isActive: boolean
   modifierGroupIds?: string[]
+  kitchenStation?: string   // e.g. 'Kitchen' | 'Bar' | 'Western'
 }
 
 // ─── Modifiers ────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ export interface Product {
 
 // ─── Table ────────────────────────────────────────────────────────────────────
 
-export type TableStatus = 'available' | 'occupied' | 'reserved' | 'cleaning'
+export type TableStatus = 'available' | 'occupied' | 'reserved'
 
 export interface Table {
   id: string
@@ -69,12 +70,29 @@ export interface Table {
   section?: string
 }
 
+// ─── Reservation ──────────────────────────────────────────────────────────────
+
+export type ReservationStatus = 'pending' | 'seated' | 'cancelled'
+
+export interface Reservation {
+  id: string
+  tableId: string
+  tableNumber: string
+  customerName: string
+  phone?: string
+  datetime: string        // ISO string
+  pax: number
+  notes?: string
+  status: ReservationStatus
+  createdAt: Date
+}
+
 // ─── Order ────────────────────────────────────────────────────────────────────
 
 export type OrderType = 'dine_in' | 'takeaway'
 export type OrderStatus = 'open' | 'sent_to_kitchen' | 'ready' | 'paid' | 'cancelled' | 'voided'
 export type PaymentMethod = 'cash' | 'card' | 'qr'
-export type OrderItemStatus = 'pending' | 'preparing' | 'ready' | 'served'
+export type OrderItemStatus = 'pending' | 'sent' | 'ready' | 'served'
 
 export interface OrderItemModifier {
   modifierGroupId: string
@@ -88,12 +106,14 @@ export interface OrderItem {
   id: string
   productId: string
   productName: string
+  productImage?: string
   price: number
   quantity: number
   modifiers: OrderItemModifier[]
   note?: string
   status: OrderItemStatus
   totalPrice: number
+  kitchenStation?: string   // denormalized from category
 }
 
 export interface Order {
@@ -108,16 +128,35 @@ export interface Order {
   status: OrderStatus
   subtotal: number
   tax: number
-  discount: number
+  discount: number          // computed flat RM amount (used in all calcs)
+  discountType?: 'flat' | 'percent'
+  discountValue?: number    // raw input (RM amount OR % value)
   total: number
   paymentMethod?: PaymentMethod
   amountPaid?: number
   change?: number
   note?: string
+  shiftId?: string
   voidReason?: string
   createdAt: Date
   updatedAt: Date
   paidAt?: Date
+}
+
+// ─── Shift ───────────────────────────────────────────────────────────────────
+
+export interface Shift {
+  id: string
+  status: 'open' | 'closed'
+  openedAt: Date
+  closedAt?: Date
+  openedBy: string
+  openedById: string
+  closedBy?: string
+  closedById?: string
+  cashFloat: number
+  closingCash?: number
+  notes?: string
 }
 
 // ─── License ──────────────────────────────────────────────────────────────────
@@ -170,6 +209,15 @@ export interface PrinterConfig {
   enabled: boolean
 }
 
+export interface PrinterProfile {
+  id: string
+  name: string
+  role: 'cashier' | 'kitchen'
+  ip: string
+  port: number
+  enabled: boolean
+}
+
 export interface AppSettings {
   restaurantName: string
   currency: string
@@ -177,4 +225,7 @@ export interface AppSettings {
   receiptFooter: string
   receiptPrinter: PrinterConfig
   kitchenPrinter: PrinterConfig
+  kitchenStations: string[]   // e.g. ['Kitchen', 'Bar']
+  printerProfiles: PrinterProfile[]
+  stationPrinterMap: Record<string, string>
 }

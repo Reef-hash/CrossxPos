@@ -127,17 +127,42 @@ interface Order {
   status: OrderStatus
   subtotal: number      // sum of item totalPrice
   tax: number           // subtotal × taxRate%
-  discount: number      // flat discount amount
+  discount: number      // flat discount amount (computed)
+  discountType?: 'flat' | 'percent'
+  discountValue?: number // raw input value
   total: number         // subtotal + tax - discount
   paymentMethod?: PaymentMethod
   amountPaid?: number
   change?: number
   note?: string
+  shiftId?: string      // ID shift semasa order dibuat
+  voidReason?: string   // sebab void (jika status === 'voided')
   createdAt: Date
   updatedAt: Date
   paidAt?: Date
 }
 ```
+
+## Shift
+
+```ts
+interface Shift {
+  id: string
+  status: 'open' | 'closed'
+  openedAt: Date
+  closedAt?: Date
+  openedBy: string        // nama cashier yang buka shift
+  openedById: string
+  closedBy?: string
+  closedById?: string
+  cashFloat: number       // modal tunai awal (RM)
+  closingCash?: number    // kiraan tunai sebenar masa tutup (dibulatkan ke 5 sen)
+  notes?: string
+}
+```
+
+> **Variance** = `closingCash` − `Math.round(cashFloat + cashSales)`  
+> `cashSales` = jumlah order.total di mana `paymentMethod === 'cash'` dalam shift tersebut.
 
 ## Settings
 

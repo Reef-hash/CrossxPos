@@ -4,6 +4,7 @@ import { initializeDatabase } from '@/db'
 import { useAuthStore } from '@/store/authStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useLicenseStore } from '@/store/licenseStore'
+import { useShiftStore } from '@/store/shiftStore'
 import { isLicenseExpired } from '@/lib/license'
 import type { StaffRole } from '@/types'
 import { AppLayout } from '@/components/layout/AppLayout'
@@ -75,11 +76,13 @@ function RoleHomeRedirect() {
 
 export default function App() {
   const { load } = useSettingsStore()
+  const { loadCurrentShift } = useShiftStore()
 
   useEffect(() => {
     initializeDatabase()
     load()
-  }, [load])
+    loadCurrentShift()
+  }, [load, loadCurrentShift])
 
   return (
     <LicenseGuard>
@@ -101,7 +104,7 @@ export default function App() {
           <Route path="tables"   element={<RoleRoute allowedRoles={['admin', 'cashier', 'waiter']}><TablesPage /></RoleRoute>} />
           <Route path="menu"     element={<RoleRoute allowedRoles={['admin']}><MenuPage /></RoleRoute>} />
           <Route path="reports"  element={<RoleRoute allowedRoles={['admin']}><ReportsPage /></RoleRoute>} />
-          <Route path="staff"    element={<RoleRoute allowedRoles={['admin']}><StaffPage /></RoleRoute>} />
+          <Route path="staff"    element={<RoleRoute allowedRoles={['admin', 'cashier']}><StaffPage /></RoleRoute>} />
           <Route path="settings" element={<RoleRoute allowedRoles={['admin']}><SettingsPage /></RoleRoute>} />
           <Route path="unauthorized" element={<UnauthorizedPage />} />
         </Route>

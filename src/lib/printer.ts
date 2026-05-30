@@ -87,7 +87,7 @@ ${
 
 // ─── Kitchen Ticket HTML ──────────────────────────────────────────────────────
 
-function buildKitchenHTML(order: Order): string {
+function buildKitchenHTML(order: Order, stationName?: string): string {
   const timeStr = new Date().toLocaleTimeString('ms-MY', {
     hour: '2-digit',
     minute: '2-digit',
@@ -104,6 +104,8 @@ function buildKitchenHTML(order: Order): string {
     })
     .join('<div class="line"></div>')
 
+  const headerTitle = stationName ? `── ${esc(stationName.toUpperCase())} ──` : '── KITCHEN ORDER ──'
+
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Kitchen Order</title><style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: 'Courier New', monospace; font-size: 14px; width: 280px; padding: 6px 8px; }
@@ -118,7 +120,7 @@ body { font-family: 'Courier New', monospace; font-size: 14px; width: 280px; pad
 @media print { @page { margin: 0; size: 72mm auto; } body { width: 72mm; } }
 </style></head><body>
 <div class="hdr">
-  <div>── KITCHEN ORDER ──</div>
+  <div>${headerTitle}</div>
   <div class="big">#${order.orderNumber}</div>
   <div class="med">${order.type === 'dine_in' ? `MEJA ${esc(order.tableNumber ?? '')}` : 'TAKE AWAY'}</div>
   <div>${timeStr}</div>
@@ -186,18 +188,18 @@ function sampleOrder(): Order {
 // ─── Print Window ─────────────────────────────────────────────────────────────
 
 function openPrintWindow(html: string): void {
-  const w = window.open('', '_blank', 'width=420,height=620,scrollbars=yes')
+  const blob = new Blob([html], { type: 'text/html' })
+  const url = URL.createObjectURL(blob)
+  const w = window.open(url, '_blank', 'width=420,height=620,scrollbars=yes')
   if (!w) {
     alert('Pop-up disekat oleh pelayar.\nSila benarkan pop-up untuk fungsi cetak.')
+    URL.revokeObjectURL(url)
     return
   }
-  w.document.write(html)
-  w.document.close()
-  w.focus()
-  setTimeout(() => {
+  w.addEventListener('load', () => {
+    URL.revokeObjectURL(url)
     w.print()
-    w.close()
-  }, 400)
+  })
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -207,9 +209,32 @@ export function printReceipt(order: Order, settings: AppSettings): void {
   openPrintWindow(buildReceiptHTML(order, settings))
 }
 
-/** Cetak tiket dapur semasa KOT (Kitchen Order Ticket). */
+/** Cetak tiket dapur semasa KOT (Kitchen Order Ticket).
+ *  Jika item ada stesen berbeza, print slip berasingan per stesen. */
 export function printKitchenTicket(order: Order): void {
-  openPrintWindow(buildKitchenHTML(order))
+  // Group items by kitchenStation (empty string = no station assigned)
+  const groups = new Map<string, typeof order.items>()
+  order.items.forEach((item) => {
+    const station = item.kitchenStation ?? ''
+    const existing = groups.get(station) ?? []
+    existing.push(item)
+    groups.set(station, existing)
+  })
+
+  if (groups.size <= 1) {
+    // Single station — print one ticket
+    const stationName = [...groups.keys()][0] || undefined
+    openPrintWindow(buildKitchenHTML(order, stationName))
+    return
+  }
+
+  // Multiple stations — print separate slip per station, staggered by 800 ms
+  let delay = 0
+  groups.forEach((items, station) => {
+    const stationOrder = { ...order, items }
+    setTimeout(() => openPrintWindow(buildKitchenHTML(stationOrder, station || undefined)), delay)
+    delay += 800
+  })
 }
 
 /** Test print — resit sampel menggunakan tetapan semasa. */

@@ -8,6 +8,8 @@ import type {
   Table,
   Order,
   AppSettings,
+  Shift,
+  Reservation,
 } from '@/types'
 
 class PosDatabase extends Dexie {
@@ -19,6 +21,8 @@ class PosDatabase extends Dexie {
   dineTables!: EntityTable<Table, 'id'>
   orders!: EntityTable<Order, 'id'>
   settings!: EntityTable<AppSettings & { id: string }, 'id'>
+  shifts!: EntityTable<Shift, 'id'>
+  reservations!: EntityTable<Reservation, 'id'>
 
   constructor() {
     super('CrossxPosDB')
@@ -72,6 +76,31 @@ class PosDatabase extends Dexie {
         await tx.table('dineTables').bulkAdd(oldTables)
       }
     })
+
+    this.version(5).stores({
+      staff: 'id, pin, name, role, isActive',
+      categories: 'id, sortOrder, isActive',
+      modifierGroups: 'id',
+      modifierOptions: 'id, groupId',
+      products: 'id, categoryId, isActive, sortOrder',
+      dineTables: 'id, number, status, section',
+      orders: 'id, orderNumber, status, type, tableId, staffId, createdAt, shiftId',
+      settings: 'id',
+      shifts: 'id, status, openedById, openedAt, closedAt',
+    })
+
+    this.version(6).stores({
+      staff: 'id, pin, name, role, isActive',
+      categories: 'id, sortOrder, isActive',
+      modifierGroups: 'id',
+      modifierOptions: 'id, groupId',
+      products: 'id, categoryId, isActive, sortOrder',
+      dineTables: 'id, number, status, section',
+      orders: 'id, orderNumber, status, type, tableId, staffId, createdAt, shiftId',
+      settings: 'id',
+      shifts: 'id, status, openedById, openedAt, closedAt',
+      reservations: 'id, tableId, datetime, status',
+    })
   }
 }
 
@@ -90,6 +119,9 @@ export async function initializeDatabase() {
       receiptFooter: 'Thank you for dining with us!',
       receiptPrinter: { ip: '192.168.1.100', port: 9100, enabled: false },
       kitchenPrinter: { ip: '192.168.1.101', port: 9100, enabled: false },
+      kitchenStations: ['Kitchen', 'Bar'],
+      printerProfiles: [],
+      stationPrinterMap: {},
     })
   }
 

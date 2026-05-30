@@ -26,7 +26,8 @@ CrossxPos/
 │   │   ├── authStore.ts         # Login/logout, currentStaff (persisted)
 │   │   ├── cartStore.ts         # Active order, add/remove items, payment
 │   │   ├── licenseStore.ts      # License state + limit checks (persisted)
-│   │   └── settingsStore.ts     # AppSettings sync dengan DB (persisted)
+│   │   ├── settingsStore.ts     # AppSettings sync dengan DB (persisted)
+│   │   └── shiftStore.ts        # Shift open/close, currentShift (persisted)
 │   │
 │   ├── components/
 │   │   ├── ui/                  # Reusable UI atoms (shadcn-style)
@@ -107,8 +108,14 @@ Table: dineTables  ← (bukan 'tables', reserved keyword dalam Dexie)
 Table: orders
   id (PK) | orderNumber | type | tableId | tableNumber | staffId | staffName
           | items[] | status | subtotal | tax | discount | total
-          | paymentMethod | amountPaid | change | note
-          | createdAt | updatedAt | paidAt
+          | paymentMethod | amountPaid | change | note | shiftId
+          | voidReason | createdAt | updatedAt | paidAt
+
+Table: shifts  ← DB version 5
+  id (PK) | status ('open'|'closed') | openedAt | closedAt
+          | openedBy | openedById | closedBy | closedById
+          | cashFloat | closingCash | notes
+  Indexes: status, openedById, openedAt, closedAt
 
 Table: settings
   id="app" | restaurantName | currency | taxRate | receiptFooter
@@ -177,6 +184,17 @@ Actions: load() → fetch from DB, save(partial) → update DB + state
 Persist: localStorage ("settings-store")
 ```
 
+### shiftStore
+```ts
+{ currentShift: Shift | null }
+Actions:
+  openShift(cashFloat, staffId, staffName)         → close lingering shifts, create new shift in DB
+  closeShift(staffId, staffName, closingCash?)      → save closingCash to DB, clear currentShift
+  loadCurrentShift()                                → query DB for open shift (called on app startup)
+Persist: localStorage ("shift-store")
+Note: loadCurrentShift() dipanggil dalam App.tsx useEffect sebagai fallback jika localStorage di-clear
+```
+
 ## Routing
 
 ```
@@ -189,7 +207,7 @@ Persist: localStorage ("settings-store")
   /tables        → RoleRoute [admin, cashier, waiter]  → TablesPage
   /menu          → RoleRoute [admin]                   → MenuPage
   /reports       → RoleRoute [admin]                   → ReportsPage
-  /staff         → RoleRoute [admin]                   → StaffPage
+  /staff         → RoleRoute [admin, cashier]          → StaffPage  ← cashier: Shift tab sahaja
   /settings      → RoleRoute [admin]                   → SettingsPage
   /unauthorized  → UnauthorizedPage (akses ditolak)
 *                → redirect to /
@@ -216,8 +234,10 @@ Persist: localStorage ("settings-store")
 | `/tables`   | ✅ | ✅ | ✅ | ❌ |
 | `/menu`     | ✅ | ❌ | ❌ | ❌ |
 | `/reports`  | ✅ | ❌ | ❌ | ❌ |
-| `/staff`    | ✅ | ❌ | ❌ | ❌ |
+| `/staff`    | ✅ | ✅\* | ❌ | ❌ |
 | `/settings` | ✅ | ❌ | ❌ | ❌ |
+
+> \* Cashier akses `/staff` untuk **Shift tab sahaja** (buka/tutup shift). Staff CRUD tab disembunyikan.
 
 ### Login Redirect Ikut Role
 | Role | Redirect ke |
@@ -270,6 +290,14 @@ tapi tidak digunakan untuk display — status dikira dari orders DB.
 
 Mencetak menggunakan `window.print()` dengan HTML berformat thermal (lebar 72mm).
 TCP/ESC-POS terus ke printer LAN memerlukan Capacitor (Phase 7).
+
+### Keputusan Implementasi Mobile (CrossxPos)
+
+- Sasaran utama ialah Android tablet/cashier station terlebih dahulu.
+- Guna `@capacitor-community/sqlite` untuk storage mobile supaya data offline kekal konsisten.
+- Guna custom Capacitor native bridge untuk raw TCP 9100 ke ESC/POS printer.
+- Jangan bergantung pada `window.print()` sebagai laluan print utama di dalam app mobile.
+- Flow print yang sama perlu disokong untuk cashier, kitchen, dan test print.
 
 ### Public API
 | Fungsi | Keterangan |

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { formatCurrency, generateId } from '@/lib/utils'
 import { useLicenseStore } from '@/store/licenseStore'
 import { formatLimit } from '@/lib/license'
-import { Plus, Pencil, Trash2, UtensilsCrossed, Settings2, Tag } from 'lucide-react'
+import { Plus, Pencil, Trash2, UtensilsCrossed, Settings2, Tag, ImagePlus, Eye, EyeOff, X, Check, GripVertical, Copy } from 'lucide-react'
 
 type View = 'products' | 'modifiers'
 
@@ -18,9 +18,13 @@ export function MenuPage() {
   const [activeCatId, setActiveCatId] = useState<string | null>(null)
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [form, setForm] = useState({ name: '', description: '', price: '', categoryId: '', modifierGroupIds: [] as string[] })
+  const [form, setForm] = useState({ name: '', description: '', price: '', categoryId: '', modifierGroupIds: [] as string[], image: '' })
   const [showAddCat, setShowAddCat] = useState(false)
   const [catName, setCatName] = useState('')
+  const [catStation, setCatStation] = useState('')
+  const [editingCatId, setEditingCatId] = useState<string | null>(null)
+  const [catEditName, setCatEditName] = useState('')
+  const [catEditStation, setCatEditStation] = useState('')
 
   // --- Modifiers state ---
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
@@ -31,8 +35,19 @@ export function MenuPage() {
   const [editingOption, setEditingOption] = useState<ModifierOption | null>(null)
   const [optionForm, setOptionForm] = useState({ name: '', price: '' })
 
+  // --- Drag state ---
+  const [dragCatId, setDragCatId] = useState<string | null>(null)
+  const [dragOverCatId, setDragOverCatId] = useState<string | null>(null)
+  const [dragProdId, setDragProdId] = useState<string | null>(null)
+  const [dragOverProdId, setDragOverProdId] = useState<string | null>(null)
+
   // --- Queries ---
   const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray())
+  const settings = useLiveQuery(() => db.settings.get('app'))
+  const kitchenStationOptions = (() => {
+    const list = Array.from(new Set((settings?.kitchenStations ?? []).map((s) => s.trim()).filter(Boolean)))
+    return list.length > 0 ? list : ['Kitchen', 'Bar']
+  })()
   const products = useLiveQuery(
     () =>
       activeCatId
@@ -45,13 +60,13 @@ export function MenuPage() {
     () =>
       activeGroupId
         ? db.modifierOptions.where('groupId').equals(activeGroupId).sortBy('sortOrder')
-        : Promise.resolve([]),
+        : Promise.resolve([] as ModifierOption[]),
     [activeGroupId]
   )
 
   // --- Product handlers ---
   const resetProductForm = () => {
-    setForm({ name: '', description: '', price: '', categoryId: '', modifierGroupIds: [] })
+    setForm({ name: '', description: '', price: '', categoryId: '', modifierGroupIds: [], image: '' })
     setEditingProduct(null)
     setShowAddProduct(false)
   }
@@ -75,8 +90,9 @@ export function MenuPage() {
       name: form.name.trim(),
       description: form.description || undefined,
       price: parseFloat(form.price),
+      image: form.image || undefined,
       modifierGroupIds: form.modifierGroupIds,
-      isActive: true,
+      isActive: editingProduct?.isActive ?? true,
       sortOrder: editingProduct?.sortOrder ?? (products?.length ?? 0),
     }
     if (editingProduct) await db.products.put(data)
@@ -88,6 +104,53 @@ export function MenuPage() {
     if (confirm('Delete this product?')) await db.products.delete(id)
   }
 
+  const handleDuplicateProduct = async (product: Product) => {
+    const total = await db.products.count()
+    if (!canAdd('products', total)) {
+      alert(`Had plan anda: ${formatLimit(limits.maxProducts)} produk. Naik taraf ke Pro untuk produk tanpa had.`)
+      return
+    }
+    const dup: Product = {
+      ...product,
+      id: generateId(),
+      name: `Salinan ${product.name}`,
+      sortOrder: (products?.length ?? 0),
+    }
+    await db.products.add(dup)
+  }
+
+  const handleCatDrop = async (targetId: string) => {
+    if (!dragCatId || dragCatId === targetId || !categories) return
+    const items = [...categories]
+    const fromIdx = items.findIndex((c) => c.id === dragCatId)
+    const toIdx = items.findIndex((c) => c.id === targetId)
+    if (fromIdx === -1 || toIdx === -1) return
+    items.splice(toIdx, 0, items.splice(fromIdx, 1)[0])
+    for (let i = 0; i < items.length; i++) {
+      await db.categories.update(items[i].id, { sortOrder: i })
+    }
+    setDragCatId(null)
+    setDragOverCatId(null)
+  }
+
+  const handleProdDrop = async (targetId: string) => {
+    if (!dragProdId || dragProdId === targetId || !products) return
+    const items = [...products]
+    const fromIdx = items.findIndex((p) => p.id === dragProdId)
+    const toIdx = items.findIndex((p) => p.id === targetId)
+    if (fromIdx === -1 || toIdx === -1) return
+    items.splice(toIdx, 0, items.splice(fromIdx, 1)[0])
+    for (let i = 0; i < items.length; i++) {
+      await db.products.update(items[i].id, { sortOrder: i })
+    }
+    setDragProdId(null)
+    setDragOverProdId(null)
+  }
+
+  const handleToggleSoldOut = async (product: Product) => {
+    await db.products.update(product.id, { isActive: !product.isActive })
+  }
+
   const openEditProduct = (product: Product) => {
     setEditingProduct(product)
     setForm({
@@ -96,15 +159,35 @@ export function MenuPage() {
       price: product.price.toString(),
       categoryId: product.categoryId,
       modifierGroupIds: product.modifierGroupIds ?? [],
+      image: product.image ?? '',
     })
     setShowAddProduct(true)
   }
 
   const handleAddCategory = async () => {
     if (!catName.trim()) return
-    await db.categories.add({ id: generateId(), name: catName.trim(), sortOrder: categories?.length ?? 0, isActive: true })
+    await db.categories.add({ id: generateId(), name: catName.trim(), sortOrder: categories?.length ?? 0, isActive: true, kitchenStation: catStation || undefined })
     setCatName('')
+    setCatStation('')
     setShowAddCat(false)
+  }
+
+  const handleSaveCategory = async () => {
+    if (!editingCatId || !catEditName.trim()) return
+    await db.categories.update(editingCatId, { name: catEditName.trim(), kitchenStation: catEditStation || undefined })
+    setEditingCatId(null)
+    setCatEditName('')
+    setCatEditStation('')
+  }
+
+  const handleDeleteCategory = async (id: string) => {
+    const productCount = await db.products.where('categoryId').equals(id).count()
+    const msg = productCount > 0
+      ? `Kategori ini ada ${productCount} produk. Produk tidak akan dihapus. Teruskan?`
+      : 'Padam kategori ini?'
+    if (!confirm(msg)) return
+    await db.categories.delete(id)
+    if (activeCatId === id) setActiveCatId(null)
   }
 
   const toggleModifierGroup = (groupId: string) => {
@@ -188,7 +271,7 @@ export function MenuPage() {
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      <div className="flex w-44 shrink-0 flex-col border-r border-zinc-200/80 bg-white">
+      <div className="flex w-56 shrink-0 flex-col border-r border-zinc-200/80 bg-white">
         <div className="flex gap-1 border-b border-zinc-200/80 p-2">
           <button
             onClick={() => setView('products')}
@@ -219,13 +302,71 @@ export function MenuPage() {
               All
             </button>
             {categories?.map((cat: Category) => (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCatId(cat.id)}
-                className={`w-full rounded-md px-2.5 py-1.5 text-left text-xs transition ${activeCatId === cat.id ? 'bg-blue-50 font-medium text-blue-600' : 'text-zinc-600 hover:bg-zinc-100'}`}
-              >
-                {cat.name}
-              </button>
+              editingCatId === cat.id ? (
+                <div key={cat.id} className="mb-0.5 space-y-1">
+                  <div className="flex items-center gap-1">
+                    <input
+                      autoFocus
+                      value={catEditName}
+                      onChange={(e) => setCatEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveCategory()
+                        if (e.key === 'Escape') setEditingCatId(null)
+                      }}
+                      className="min-w-0 flex-1 rounded border border-blue-400 px-2 py-1.5 text-xs focus:outline-none"
+                    />
+                    <button onClick={handleSaveCategory} className="shrink-0 rounded-lg bg-blue-600 p-2 text-white active:bg-blue-700">
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => setEditingCatId(null)} className="shrink-0 rounded-lg bg-zinc-100 p-2 text-zinc-500 active:bg-zinc-200">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <select
+                    value={catEditStation}
+                    onChange={(e) => setCatEditStation(e.target.value)}
+                    className="w-full rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 focus:outline-none"
+                  >
+                    <option value="">Tiada stesen</option>
+                      {kitchenStationOptions.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div
+                  key={cat.id}
+                  draggable
+                  onDragStart={() => setDragCatId(cat.id)}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverCatId(cat.id) }}
+                  onDragLeave={() => setDragOverCatId(null)}
+                  onDrop={() => handleCatDrop(cat.id)}
+                  onDragEnd={() => { setDragCatId(null); setDragOverCatId(null) }}
+                  className={`mb-0.5 flex items-center rounded-md transition ${dragOverCatId === cat.id && dragCatId !== cat.id ? 'bg-blue-50 ring-1 ring-blue-300' : ''} ${dragCatId === cat.id ? 'opacity-40' : ''}`}
+                >
+                  <span className="cursor-grab px-1 text-zinc-300 active:cursor-grabbing">
+                    <GripVertical className="h-3.5 w-3.5" />
+                  </span>
+                  <button
+                    onClick={() => setActiveCatId(cat.id)}
+                    className={`min-w-0 flex-1 truncate rounded-md px-1.5 py-2 text-left text-xs transition ${activeCatId === cat.id ? 'font-medium text-blue-600' : 'text-zinc-600 active:bg-zinc-100'}`}
+                  >
+                    {cat.name}
+                  </button>
+                  <button
+                    onClick={() => { setEditingCatId(cat.id); setCatEditName(cat.name); setCatEditStation(cat.kitchenStation ?? '') }}
+                    className="shrink-0 rounded-lg p-2 text-blue-400 transition active:bg-blue-50"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteCategory(cat.id)}
+                    className="shrink-0 rounded-lg p-2 text-red-400 transition active:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              )
             ))}
           </div>
         )}
@@ -267,7 +408,7 @@ export function MenuPage() {
                 size="sm"
                 onClick={() => {
                   setEditingProduct(null)
-                  setForm({ name: '', description: '', price: '', categoryId: activeCatId ?? '', modifierGroupIds: [] })
+                  setForm({ name: '', description: '', price: '', categoryId: activeCatId ?? '', modifierGroupIds: [], image: '' })
                   setShowAddProduct(true)
                 }}
               >
@@ -278,26 +419,68 @@ export function MenuPage() {
             {products && products.length > 0 ? (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {products.map((product: Product) => (
-                  <div key={product.id} className="rounded-xl border border-zinc-200/80 bg-white p-3 shadow-sm">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-zinc-900">{product.name}</p>
-                        {product.description && <p className="mt-0.5 text-xs text-zinc-500">{product.description}</p>}
-                        <p className="mt-1 text-sm font-semibold text-blue-600">{formatCurrency(product.price)}</p>
-                        {(product.modifierGroupIds?.length ?? 0) > 0 && (
-                          <p className="mt-1 flex items-center gap-1 text-[11px] text-zinc-400">
-                            <Settings2 className="h-3 w-3" />
-                            {product.modifierGroupIds.length} modifier group{product.modifierGroupIds.length > 1 ? 's' : ''}
-                          </p>
+                  <div
+                    key={product.id}
+                    draggable
+                    onDragStart={() => setDragProdId(product.id)}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverProdId(product.id) }}
+                    onDragLeave={() => setDragOverProdId(null)}
+                    onDrop={() => handleProdDrop(product.id)}
+                    onDragEnd={() => { setDragProdId(null); setDragOverProdId(null) }}
+                    className={`overflow-hidden rounded-xl border bg-white shadow-sm transition
+                      ${!product.isActive ? 'border-zinc-200 opacity-60' : 'border-zinc-200/80'}
+                      ${dragOverProdId === product.id && dragProdId !== product.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}
+                      ${dragProdId === product.id ? 'opacity-40 scale-95' : ''}`}
+                  >
+                    {product.image && (
+                      <div className="relative h-36 w-full overflow-hidden bg-zinc-100">
+                        <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+                        {!product.isActive && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                            <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold uppercase text-white">Sold Out</span>
+                          </div>
                         )}
                       </div>
-                      <div className="flex gap-0.5">
-                        <button onClick={() => openEditProduct(product)} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-blue-600">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button onClick={() => handleDeleteProduct(product.id)} className="rounded p-1 text-zinc-400 hover:bg-red-50 hover:text-red-500">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                    )}
+                    <div className="p-3">
+                      <div className="flex items-start justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="text-sm font-medium text-zinc-900">{product.name}</p>
+                            {!product.isActive && !product.image && (
+                              <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">Sold Out</span>
+                            )}
+                          </div>
+                          {product.description && <p className="mt-0.5 text-xs text-zinc-500">{product.description}</p>}
+                          <p className="mt-1 text-sm font-semibold text-blue-600">{formatCurrency(product.price)}</p>
+                          {(product.modifierGroupIds?.length ?? 0) > 0 && (
+                            <p className="mt-1 flex items-center gap-1 text-[11px] text-zinc-400">
+                              <Settings2 className="h-3 w-3" />
+                              {product.modifierGroupIds.length} modifier group{product.modifierGroupIds.length > 1 ? 's' : ''}
+                            </p>
+                          )}
+                        </div>
+                        <div className="ml-1 flex shrink-0 items-center gap-0.5">
+                          <span className="cursor-grab text-zinc-300 active:cursor-grabbing">
+                            <GripVertical className="h-4 w-4" />
+                          </span>
+                          <button
+                            onClick={() => handleToggleSoldOut(product)}
+                            title={product.isActive ? 'Tandakan Sold Out' : 'Tandakan Available'}
+                            className={`rounded p-2 transition ${product.isActive ? 'text-zinc-400 hover:bg-amber-50 hover:text-amber-500' : 'text-red-400 hover:bg-red-50 hover:text-red-600'}`}
+                          >
+                            {product.isActive ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                          </button>
+                          <button onClick={() => handleDuplicateProduct(product)} title="Duplikasi produk" className="rounded p-2 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600">
+                            <Copy className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => openEditProduct(product)} className="rounded p-2 text-zinc-400 hover:bg-zinc-100 hover:text-blue-600">
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => handleDeleteProduct(product.id)} className="rounded p-2 text-zinc-400 hover:bg-red-50 hover:text-red-500">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -431,6 +614,38 @@ export function MenuPage() {
                 <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional description" />
               </div>
               <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-700">Gambar Produk</label>
+                {form.image && (
+                  <div className="relative mb-2 h-28 w-full overflow-hidden rounded-lg border border-zinc-200">
+                    <img src={form.image} alt="preview" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, image: '' })}
+                      className="absolute right-1.5 top-1.5 rounded-full bg-black/50 p-1 text-white hover:bg-black/70"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-zinc-300 p-2.5 text-xs text-zinc-500 transition hover:border-blue-400 hover:text-blue-500">
+                  <ImagePlus className="h-4 w-4" />
+                  <span>{form.image ? 'Tukar gambar' : 'Upload gambar (max 1MB)'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      if (file.size > 1024 * 1024) { alert('Imej terlalu besar. Maksimum 1MB.'); return }
+                      const reader = new FileReader()
+                      reader.onload = () => setForm((f) => ({ ...f, image: reader.result as string }))
+                      reader.readAsDataURL(file)
+                    }}
+                  />
+                </label>
+              </div>
+              <div>
                 <label className="mb-1 block text-xs font-medium text-zinc-700">Price (MYR) *</label>
                 <Input type="number" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0.00" />
               </div>
@@ -484,6 +699,16 @@ export function MenuPage() {
           <div className="w-full max-w-xs rounded-xl bg-white p-5 shadow-xl ring-1 ring-zinc-200">
             <h3 className="mb-3 text-sm font-semibold text-zinc-900">Add Category</h3>
             <Input value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Category name" onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()} />
+            <select
+              value={catStation}
+              onChange={(e) => setCatStation(e.target.value)}
+              className="mt-2 w-full rounded border border-zinc-200 px-2 py-1.5 text-xs text-zinc-600 focus:outline-none"
+            >
+              <option value="">Tiada stesen (default)</option>
+              {kitchenStationOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
             <div className="mt-3 flex gap-2">
               <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowAddCat(false)}>Cancel</Button>
               <Button size="sm" className="flex-1" onClick={handleAddCategory}>Add</Button>

@@ -1,29 +1,8 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import {
-  ShoppingCart,
-  LayoutGrid,
-  UtensilsCrossed,
-  ClipboardList,
-  BarChart3,
-  Settings,
-  Users,
-  ChefHat,
-  LogOut,
-  MonitorSmartphone,
-} from 'lucide-react'
+import { LogOut, MonitorSmartphone } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
-
-const navItems = [
-  { to: '/cashier', icon: ShoppingCart, label: 'Cashier', roles: ['admin', 'cashier', 'waiter'] },
-  { to: '/orders', icon: ClipboardList, label: 'Orders', roles: ['admin', 'cashier'] },
-  { to: '/kitchen', icon: ChefHat, label: 'Kitchen', roles: ['admin', 'kitchen', 'cashier'] },
-  { to: '/tables', icon: LayoutGrid, label: 'Tables', roles: ['admin', 'cashier', 'waiter'] },
-  { to: '/menu', icon: UtensilsCrossed, label: 'Menu', roles: ['admin'] },
-  { to: '/reports', icon: BarChart3, label: 'Reports', roles: ['admin'] },
-  { to: '/staff', icon: Users, label: 'Staff', roles: ['admin'] },
-  { to: '/settings', icon: Settings, label: 'Settings', roles: ['admin'] },
-]
+import { navItems } from './navItems'
 
 export function Sidebar() {
   const { currentStaff, logout } = useAuthStore()
@@ -39,7 +18,7 @@ export function Sidebar() {
   )
 
   return (
-    <aside className="flex h-screen w-14 flex-col items-center border-r border-zinc-200/80 bg-white py-3 lg:w-52 lg:items-start lg:px-2.5">
+    <aside className="hidden h-screen w-14 flex-col items-center border-r border-zinc-200/80 bg-white py-3 lg:flex lg:w-52 lg:items-start lg:px-2.5">
       {/* Logo */}
       <div className="mb-5 flex items-center gap-2 px-2">
         <MonitorSmartphone className="h-6 w-6 shrink-0 text-blue-600" />
@@ -47,7 +26,7 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex flex-1 flex-col gap-0.5 w-full">
+      <nav className="flex w-full flex-1 flex-col gap-0.5">
         {visibleItems.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}

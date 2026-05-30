@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Order, OrderItem, OrderItemModifier, OrderType } from '@/types'
+import type { Order, OrderItem, OrderType } from '@/types'
 import { generateId, generateOrderNumber } from '@/lib/utils'
 import { db } from '@/db'
 
@@ -11,7 +11,8 @@ interface CartState {
     staffId: string,
     staffName: string,
     tableId?: string,
-    tableNumber?: string
+    tableNumber?: string,
+    shiftId?: string
   ) => Order
   // Add item to cart
   addItem: (item: Omit<OrderItem, 'id' | 'status'>) => void
@@ -21,8 +22,8 @@ interface CartState {
   removeItem: (itemId: string) => void
   // Add note to item
   setItemNote: (itemId: string, note: string) => void
-  // Apply discount (flat amount)
-  setDiscount: (discount: number) => void
+  // Apply discount — flat RM or percentage
+  setDiscount: (type: 'flat' | 'percent', value: number) => void
   // Set order note
   setOrderNote: (note: string) => void
   // Send order to kitchen & save to DB
@@ -37,6 +38,10 @@ interface CartState {
   clearOrder: () => void
   // Load existing order (for editing)
   loadOrder: (order: Order) => void
+  // Transfer active dine-in order to another table
+  transferTable: (newTableId: string, newTableNumber: string) => Promise<void>
+  // Merge another occupied table's order into the active order
+  mergeFrom: (sourceOrderId: string, sourceTableId: string) => Promise<void>
 }
 
 function recalcTotals(order: Order, taxRate: number): Order {
@@ -49,7 +54,7 @@ function recalcTotals(order: Order, taxRate: number): Order {
 export const useCartStore = create<CartState>()((set, get) => ({
   activeOrder: null,
 
-  startOrder: (type, staffId, staffName, tableId, tableNumber) => {
+  startOrder: (type, staffId, staffName, tableId, tableNumber, shiftId) => {
     const order: Order = {
       id: generateId(),
       orderNumber: generateOrderNumber(),
@@ -58,6 +63,7 @@ export const useCartStore = create<CartState>()((set, get) => ({
       tableNumber,
       staffId,
       staffName,
+      shiftId,
       items: [],
       status: 'open',
       subtotal: 0,
@@ -74,6 +80,20 @@ export const useCartStore = create<CartState>()((set, get) => ({
   addItem: (item) =>
     set((state) => {
       if (!state.activeOrder) return state
+      // Merge with existing item if same product + same modifier selection
+      const itemKey = item.modifiers.map((m) => m.optionId).sort().join(',')
+      const existing = state.activeOrder.items.find(
+        (i) => i.productId === item.productId &&
+          i.modifiers.map((m) => m.optionId).sort().join(',') === itemKey
+      )
+      if (existing) {
+        const items = state.activeOrder.items.map((i) =>
+          i.id === existing.id
+            ? { ...i, quantity: i.quantity + 1, totalPrice: i.totalPrice + item.totalPrice }
+            : i
+        )
+        return { activeOrder: { ...state.activeOrder, items, updatedAt: new Date() } }
+      }
       const newItem: OrderItem = { ...item, id: generateId(), status: 'pending' }
       const items = [...state.activeOrder.items, newItem]
       return { activeOrder: { ...state.activeOrder, items, updatedAt: new Date() } }
@@ -94,6 +114,7 @@ export const useCartStore = create<CartState>()((set, get) => ({
                   }
                 : i
             )
+      if (items.length === 0) return { activeOrder: null }
       return { activeOrder: { ...state.activeOrder, items, updatedAt: new Date() } }
     }),
 
@@ -101,6 +122,7 @@ export const useCartStore = create<CartState>()((set, get) => ({
     set((state) => {
       if (!state.activeOrder) return state
       const items = state.activeOrder.items.filter((i) => i.id !== itemId)
+      if (items.length === 0) return { activeOrder: null }
       return { activeOrder: { ...state.activeOrder, items, updatedAt: new Date() } }
     }),
 
@@ -111,10 +133,24 @@ export const useCartStore = create<CartState>()((set, get) => ({
       return { activeOrder: { ...state.activeOrder, items } }
     }),
 
-  setDiscount: (discount) =>
+  setDiscount: (type, value) =>
     set((state) => {
       if (!state.activeOrder) return state
-      return { activeOrder: { ...state.activeOrder, discount, updatedAt: new Date() } }
+      const subtotal = state.activeOrder.items.reduce((sum, item) => sum + item.totalPrice, 0)
+      const clampedValue = type === 'percent' ? Math.min(Math.max(value, 0), 100) : Math.max(value, 0)
+      const discount =
+        type === 'percent'
+          ? parseFloat(((clampedValue / 100) * subtotal).toFixed(2))
+          : parseFloat(Math.min(clampedValue, subtotal).toFixed(2))
+      return {
+        activeOrder: {
+          ...state.activeOrder,
+          discount,
+          discountType: type,
+          discountValue: clampedValue,
+          updatedAt: new Date(),
+        },
+      }
     }),
 
   setOrderNote: (note) =>
@@ -165,4 +201,32 @@ export const useCartStore = create<CartState>()((set, get) => ({
   clearOrder: () => set({ activeOrder: null }),
 
   loadOrder: (order) => set({ activeOrder: order }),
+
+  transferTable: async (newTableId, newTableNumber) => {
+    const order = get().activeOrder
+    if (!order || order.type !== 'dine_in') return
+    const oldTableId = order.tableId
+    await db.orders.update(order.id, { tableId: newTableId, tableNumber: newTableNumber, updatedAt: new Date() })
+    if (oldTableId) await db.dineTables.update(oldTableId, { status: 'available' })
+    await db.dineTables.update(newTableId, { status: 'occupied' })
+    set((state) => ({
+      activeOrder: state.activeOrder
+        ? { ...state.activeOrder, tableId: newTableId, tableNumber: newTableNumber, updatedAt: new Date() }
+        : null,
+    }))
+  },
+
+  mergeFrom: async (sourceOrderId, sourceTableId) => {
+    const order = get().activeOrder
+    if (!order) return
+    const source = await db.orders.get(sourceOrderId)
+    if (!source) return
+    // Append source items into active order
+    const merged = { ...order, items: [...order.items, ...source.items], updatedAt: new Date() }
+    await db.orders.put(merged)
+    // Void source order and free its table
+    await db.orders.update(sourceOrderId, { status: 'voided', voidReason: `Digabung ke Order #${order.orderNumber}`, updatedAt: new Date() })
+    await db.dineTables.update(sourceTableId, { status: 'available' })
+    set({ activeOrder: merged })
+  },
 }))

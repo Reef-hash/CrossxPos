@@ -110,37 +110,103 @@ node scripts/generate-license.mjs --plan pro --restaurant "Restaurant XYZ" --id 
 - [x] Void order — OrdersPage: butang Void (admin/cashier), modal reason, update status `voided`, bebaskan meja
 - [x] Discount per-order — CashierPage: input discount (RM flat) dalam totals, admin/cashier sahaja
 - [x] Edit order yang dah sent_to_kitchen — sudah berfungsi: butang "Add" load order ke cart, item baru jadi `pending`, hantar KOT semula
-- [ ] Split bill (bahagi bayaran antara beberapa customers)
+- [x] Split bill (kalkulator pisah bil — Pro feature, tunjuk jumlah setiap orang)
 - [ ] Void order dalam ReportsPage (history)
-- [ ] Discount percentage (kini hanya flat RM)
+- [x] Discount percentage (RM flat + %)
+
+#### Shift (improvements)
+- [ ] Filter shift history by tarikh dalam StaffPage
+- [ ] Cashier hanya nampak shift sendiri (bukan semua shift)
+- [ ] Alert/warning kalau shift dah buka terlalu lama (> 12 jam)
 
 #### Menu (improvements)
-- [ ] Product image upload (store sebagai base64 atau IndexedDB blob)
-- [ ] Drag-and-drop sort order untuk categories & products
-- [ ] Toggle product active/inactive (sold out)
-- [ ] Copy/duplicate product
+- [x] Product image upload (store sebagai base64 dalam IndexedDB, preview dalam MenuPage & CashierPage)
+- [x] Drag-and-drop sort order untuk categories & products
+- [x] Toggle product active/inactive (sold out) — butang toggle di MenuPage, CashierPage hide produk tidak aktif
+- [x] Copy/duplicate product
 
 #### Reports (improvements) ✅
 - [x] Filter by date range — quick buttons: Hari Ini / Minggu Ini / Bulan Ini / Tersuai (calendar input)
 - [x] Hourly sales chart (CSS bar chart, tiada library luaran)
 - [x] Export to CSV (download file)
 - [x] Sales by category breakdown
+- [x] Monthly archive panel (sidebar kanan, klik bulan → auto set date range)
+- [x] Shift filter dropdown (filter report by shift ID)
+
+#### Shift Management ✅
+- [x] `Shift` interface dalam `types/index.ts` (`cashFloat`, `closingCash`, `status`, etc.)
+- [x] `shiftId?: string` ditambah pada `Order` interface
+- [x] DB version 5 — table `shifts` dengan indexes: `status, openedById, openedAt, closedAt`
+- [x] `src/store/shiftStore.ts` — Zustand persist store (`openShift`, `closeShift`, `loadCurrentShift`)
+- [x] `loadCurrentShift()` dipanggil dalam `App.tsx` on startup (fallback jika localStorage di-clear)
+- [x] `cartStore.ts` — `startOrder()` terima `shiftId` sebagai parameter ke-6
+- [x] `TablesPage.tsx` — `startOrder()` pass `currentShift?.id`
+- [x] `CashierPage.tsx` — warning banner "Tiada shift aktif", pass `shiftId` ke `startOrder()`
+- [x] `StaffPage.tsx` — tab Shift (buka/tutup shift, sejarah shift, variance report)
+- [x] Cashier boleh akses `/staff` (Shift tab sahaja, Staff CRUD disembunyikan)
+- [x] Numeric keypad floating (trigger bila tap field) — sesuai untuk tablet/IMIN
+- [x] Auto-round jangkaan ke RM penuh, kiraan cashier dibulatkan ke 5 sen
+- [x] Variance report dalam table sejarah: Jualan, Jangkaan Tunai, Kiraan Tutup, Varians (colour-coded)
 
 #### Table Management (improvements)
 - [ ] Drag table layout (custom floor plan)
-- [ ] Merge tables (combine orders)
-- [ ] Transfer order ke table lain
-- [ ] Reservation dengan nama & masa
+- [x] Merge tables (combine orders)
+- [x] Transfer order ke table lain
+- [x] Reservation dengan nama & masa
+
+### Pre-Capacitor Gate (CrossxPos sahaja)
+
+> Wajib jelas & disahkan sebelum mula `npx cap init`.
+
+- [x] Finalize strategi printing mobile: Capacitor Android-first + native TCP/ESC-POS bridge untuk printer; guna `@capacitor-community/sqlite` untuk data mobile
+- [x] Tetapkan routing station → printer untuk kitchen/cashier (dokumen + UI settings)
+- [x] `index.html` tambah `viewport-fit=cover`
+- [x] Root layout tambah safe-area inset padding (`env(safe-area-inset-*)`)
+- [x] Putuskan UX mobile: responsive + bottom tab bar
+- [x] Ujian manual flow penting di browser: login, cashier, KOT, kitchen, checkout, reports
+- [x] Sahkan semua docs status selari dengan kod semasa (overview/todo/README)
 
 ### Low Priority / Future
 
 #### Capacitor Setup
-- [ ] `npm install @capacitor/core @capacitor/cli`
-- [ ] `npx cap init`
-- [ ] `@capacitor/android` + `@capacitor/ios`
-- [ ] `@capacitor-community/sqlite` (replace IndexedDB untuk mobile)
+- [x] `npm install @capacitor/core @capacitor/cli`
+- [x] `npx cap init`
+- [x] `@capacitor/android` + `@capacitor/ios`
+- [x] `@capacitor-community/sqlite` (replace IndexedDB untuk mobile)
 - [ ] TCP socket plugin untuk printer (cth: `@ottimis/capacitor-socket`)
 - [ ] Splash screen, app icon
+
+#### Capacitor — Layout Preparation (buat sebelum wrap)
+> Kena siap sebelum `npx cap add android`
+
+**CSS / Meta:**
+- [x] `index.html`: tambah `viewport-fit=cover` dalam meta viewport
+- [x] Global CSS: tambah `padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)` pada root layout
+
+**Navigation:**
+- [x] Tukar sidebar kiri → **bottom tab bar** untuk skrin < `lg` (< 1024px)
+- [ ] Pilihan A (mudah): Lock orientation landscape dalam `capacitor.config.ts` → `"orientation": "landscape"` — sidebar masih okay
+- [x] Pilihan B (lebih baik): Responsive layout, sidebar hide pada md/sm, bottom nav muncul
+
+**CashierPage pada tablet 8–9":**
+- [ ] Landscape 1280×800: layout 3-panel masih okay ✅
+- [ ] Portrait: cart perlu jadi slide-up panel (bottom sheet) — perlu redesign
+
+#### Capacitor — Sasaran Peranti
+
+**Cashier Station (fixed counter):**
+- IMIN D1 / D3 (8"–15.6") — layout sekarang sesuai terus
+
+**Staff Tablet (bawa jalan ambil order, bajet < RM 500):**
+
+| Tablet | Saiz | RAM | Harga (~RM) | Catatan |
+|---|---|---|---|---|
+| **Redmi Pad SE** | 8.7" / 11" | 4–8GB | 350–480 | ✅ Terbaik nilai/harga, WiFi 5GHz |
+| **Samsung Tab A9** | 8.7" | 4GB | 450–500 | ✅ Boleh dipercayai, banyak service center |
+| **Lenovo Tab M9** | 9" | 4GB | 350–420 | ✅ Tahan lasak, bateri besar |
+| **Realme Pad Mini** | 8.7" | 3GB | 300–380 | ⚠️ OK, build quality biasa |
+
+> **Elak** tablet China tanpa nama dengan spec "16GB RAM + Mali-400 GPU" — spec palsu, tidak boleh dipercayai untuk persekitaran POS komersial.
 
 #### Multi-device Sync
 - [ ] Waiter tablets submit orders → masuk ke cashier queue secara real-time
@@ -154,6 +220,7 @@ node scripts/generate-license.mjs --plan pro --restaurant "Restaurant XYZ" --id 
 ---
 
 ## Known Issues / Tech Debt
+
 - `App.css` (default Vite file) masih ada, belum dibuang
 - `src/assets/` masih ada default Vite assets
 - `cartStore.ts`: `recalcTotals()` dipanggil dalam `processPayment` tapi tidak dikemaskini secara reactive — cart display di CashierPage kira semula inline (ok untuk sekarang)
