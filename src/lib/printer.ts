@@ -1,14 +1,48 @@
 /**
  * CrossxPOS — Print Utility
  *
- * Menggunakan window.print() dengan HTML berformat thermal untuk cetak
- * resit dan tiket dapur. Format disesuaikan untuk lebar 72mm.
+ * Two print paths:
+ *  1. TCP/ESC-POS (preferred) — sends raw bytes to LAN/WiFi printer via the
+ *     local print bridge (scripts/print-bridge.mjs).  No browser dialog.
+ *     Falls back to window.print() automatically if bridge is not running.
+ *  2. window.print() (fallback) — opens a pop-up with thermal-width HTML.
  *
- * ⚠️  TCP/ESC-POS (cetak terus ke printer LAN tanpa dialog) memerlukan
- *      Capacitor Native TCP — akan diimplementasikan dalam Phase 7.
+ * To enable direct WiFi printing:
+ *  a) Run:  npm run bridge  (in a second terminal)
+ *  b) In Settings → Printer, tick Enabled and enter the printer IP.
  */
 
 import type { Order, AppSettings } from '@/types'
+import { buildKitchenEscPos, buildReceiptEscPos } from '@/lib/escpos'
+
+// ─── Print Bridge ─────────────────────────────────────────────────────────────
+
+const BRIDGE_URL = 'http://127.0.0.1:6100/print'
+
+/** Encode Uint8Array to base64 without spread (safe for large buffers). */
+function toBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
+/**
+ * Sends ESC/POS bytes to the local print bridge, which forwards them via TCP
+ * to the printer at ip:port.
+ * Throws if bridge is unreachable or returns an error.
+ */
+async function sendViaBridge(ip: string, port: number, bytes: Uint8Array): Promise<void> {
+  const resp = await fetch(BRIDGE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ip, port, data: toBase64(bytes) }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }))
+    throw new Error((body as { error?: string }).error ?? `HTTP ${resp.status}`)
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -204,15 +238,34 @@ function openPrintWindow(html: string): void {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/** Cetak resit pelanggan selepas pembayaran. */
+/**
+ * Cetak resit pelanggan selepas pembayaran.
+ * Cuba TCP bridge dahulu (jika receiptPrinter.enabled dan IP ada),
+ * fallback ke window.print() jika bridge tidak running.
+ */
 export function printReceipt(order: Order, settings: AppSettings): void {
-  openPrintWindow(buildReceiptHTML(order, settings))
+  const { receiptPrinter } = settings
+  if (receiptPrinter.enabled && receiptPrinter.ip) {
+    const bytes = buildReceiptEscPos(order, settings)
+    sendViaBridge(receiptPrinter.ip, receiptPrinter.port, bytes).catch(() => {
+      // Bridge not running — fall back to browser print dialog
+      openPrintWindow(buildReceiptHTML(order, settings))
+    })
+  } else {
+    openPrintWindow(buildReceiptHTML(order, settings))
+  }
 }
 
-/** Cetak tiket dapur semasa KOT (Kitchen Order Ticket).
- *  Jika item ada stesen berbeza, print slip berasingan per stesen. */
-export function printKitchenTicket(order: Order): void {
-  // Group items by kitchenStation (empty string = no station assigned)
+/**
+ * Cetak tiket dapur semasa KOT (Kitchen Order Ticket).
+ * Jika item ada stesen berbeza, print slip berasingan per stesen.
+ * Cuba TCP bridge dahulu (kitchenPrinter.enabled + IP), fallback ke window.print().
+ * Jika stesen ada mapping ke printer profile, guna IP profile tersebut.
+ */
+export function printKitchenTicket(order: Order, settings: AppSettings): void {
+  const { kitchenPrinter, printerProfiles, stationPrinterMap } = settings
+
+  // Group items by kitchenStation
   const groups = new Map<string, typeof order.items>()
   order.items.forEach((item) => {
     const station = item.kitchenStation ?? ''
@@ -221,34 +274,68 @@ export function printKitchenTicket(order: Order): void {
     groups.set(station, existing)
   })
 
-  if (groups.size <= 1) {
-    // Single station — print one ticket
-    const stationName = [...groups.keys()][0] || undefined
-    openPrintWindow(buildKitchenHTML(order, stationName))
-    return
-  }
+  const tryBridge = kitchenPrinter.enabled && Boolean(kitchenPrinter.ip)
 
-  // Multiple stations — print separate slip per station, staggered by 800 ms
+  // window.print() fallback needs staggered delay to avoid overlapping dialogs
   let delay = 0
   groups.forEach((items, station) => {
     const stationOrder = { ...order, items }
-    setTimeout(() => openPrintWindow(buildKitchenHTML(stationOrder, station || undefined)), delay)
-    delay += 800
+    const stationName  = station || undefined
+
+    if (tryBridge) {
+      // Resolve printer IP: prefer station-mapped profile, else legacy kitchenPrinter
+      const mappedProfileId = (stationPrinterMap ?? {})[station]
+      const profile = mappedProfileId
+        ? (printerProfiles ?? []).find((p) => p.id === mappedProfileId)
+        : null
+      const printerIp   = profile?.ip   ?? kitchenPrinter.ip
+      const printerPort = profile?.port ?? kitchenPrinter.port
+
+      const bytes = buildKitchenEscPos(stationOrder, stationName)
+      sendViaBridge(printerIp, printerPort, bytes).catch(() => {
+        openPrintWindow(buildKitchenHTML(stationOrder, stationName))
+      })
+    } else {
+      setTimeout(() => openPrintWindow(buildKitchenHTML(stationOrder, stationName)), delay)
+      delay += 800
+    }
   })
 }
 
-/** Test print — resit sampel menggunakan tetapan semasa. */
+/**
+ * Test print — resit sampel menggunakan tetapan semasa.
+ * Guna TCP bridge jika receiptPrinter.enabled dan IP ada.
+ */
 export function testPrintReceipt(settings: AppSettings): void {
-  openPrintWindow(buildReceiptHTML(sampleOrder(), settings))
+  const { receiptPrinter } = settings
+  const sample = sampleOrder()
+  if (receiptPrinter.enabled && receiptPrinter.ip) {
+    const bytes = buildReceiptEscPos(sample, settings)
+    sendViaBridge(receiptPrinter.ip, receiptPrinter.port, bytes).catch(() => {
+      openPrintWindow(buildReceiptHTML(sample, settings))
+    })
+  } else {
+    openPrintWindow(buildReceiptHTML(sample, settings))
+  }
 }
 
-/** Test print — tiket dapur sampel. */
-export function testPrintKitchen(): void {
-  openPrintWindow(
-    buildKitchenHTML({
-      ...sampleOrder(),
-      status: 'sent_to_kitchen',
-      items: sampleOrder().items.map((i) => ({ ...i, status: 'pending' })),
+/**
+ * Test print — tiket dapur sampel menggunakan tetapan semasa.
+ * Guna TCP bridge jika kitchenPrinter.enabled dan IP ada.
+ */
+export function testPrintKitchen(settings: AppSettings): void {
+  const { kitchenPrinter } = settings
+  const sample: Order = {
+    ...sampleOrder(),
+    status: 'sent_to_kitchen',
+    items: sampleOrder().items.map((i) => ({ ...i, status: 'pending' })),
+  }
+  if (kitchenPrinter.enabled && kitchenPrinter.ip) {
+    const bytes = buildKitchenEscPos(sample)
+    sendViaBridge(kitchenPrinter.ip, kitchenPrinter.port, bytes).catch(() => {
+      openPrintWindow(buildKitchenHTML(sample))
     })
-  )
+  } else {
+    openPrintWindow(buildKitchenHTML(sample))
+  }
 }

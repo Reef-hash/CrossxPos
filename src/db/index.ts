@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
+import { generateId } from '@/lib/utils'
 import type {
   Staff,
   Category,
@@ -129,7 +130,7 @@ export async function initializeDatabase() {
   const staffCount = await db.staff.count()
   if (staffCount === 0) {
     await db.staff.add({
-      id: crypto.randomUUID(),
+      id: generateId(),
       name: 'Admin',
       pin: '1234',
       role: 'admin',

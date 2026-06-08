@@ -162,7 +162,17 @@ export interface Shift {
 // ─── License ──────────────────────────────────────────────────────────────────
 
 export type LicensePlan = 'basic' | 'pro'
-export type LicenseStatus = 'active' | 'expired' | 'invalid' | 'not_activated'
+export type LicenseStatus =
+  | 'active'
+  | 'expired'
+  | 'invalid'
+  | 'not_activated'
+  | 'grace'            // offline, cache still valid
+  | 'grace_expired'    // offline, cache too old
+  | 'device_mismatch'
+  | 'seat_exceeded'
+  | 'revoked'
+  | 'product_mismatch'
 
 /**
  * Hadkan sumber berdasarkan plan.

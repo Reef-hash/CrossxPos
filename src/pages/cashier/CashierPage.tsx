@@ -171,7 +171,7 @@ export function CashierPage() {
     await sendToKitchen()
     navigate('/orders')
     if (settings.kitchenPrinter.enabled && orderSnapshot) {
-      printKitchenTicket(orderSnapshot)
+      printKitchenTicket(orderSnapshot, settings)
     }
   }
 

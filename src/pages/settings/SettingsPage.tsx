@@ -133,9 +133,8 @@ export function SettingsPage() {
       return
     }
 
-    // Untuk mode browser semasa ini, kita uji flow cetak sample dahulu.
     if (newPrinterRole === 'cashier') testPrintReceipt(form)
-    else testPrintKitchen()
+    else testPrintKitchen(form)
 
     setTestedPrinterSignature(`${name}|${ip}|${port}|${newPrinterRole}`)
   }
@@ -458,7 +457,7 @@ export function SettingsPage() {
               variant="outline"
               size="sm"
               className="w-full mt-1 text-xs"
-              onClick={() => testPrintKitchen()}
+              onClick={() => testPrintKitchen(form)}
             >
               <Printer className="mr-1.5 h-3 w-3" /> Test Print Tiket Dapur
             </Button>

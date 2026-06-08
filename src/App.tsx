@@ -5,7 +5,6 @@ import { useAuthStore } from '@/store/authStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useLicenseStore } from '@/store/licenseStore'
 import { useShiftStore } from '@/store/shiftStore'
-import { isLicenseExpired } from '@/lib/license'
 import type { StaffRole } from '@/types'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/auth/LoginPage'
@@ -20,15 +19,23 @@ import { ReportsPage } from '@/pages/reports/ReportsPage'
 import { StaffPage } from '@/pages/staff/StaffPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 
+/** Statuses that block access and require activation or renewal. */
+const BLOCKING_STATUSES = new Set(['not_activated', 'invalid', 'expired', 'revoked', 'product_mismatch', 'grace_expired'])
+
 /**
  * LicenseGuard — Semak lesen sebelum benarkan akses ke app.
- * Jika lesen belum diaktifkan atau tamat tempoh → papar LicenseActivationPage.
+ * active/grace → allow access.
+ * device_mismatch/seat_exceeded → allow access but show warning banner (handled in LicenseActivationPage).
+ * blocking statuses → show LicenseActivationPage.
  */
 function LicenseGuard({ children }: { children: React.ReactNode }) {
-  const license = useLicenseStore((s) => s.license)
-  const isValid = license !== null && !isLicenseExpired(license)
-  if (!isValid) return <LicenseActivationPage />
-  return <>{children}</>
+  const status = useLicenseStore((s) => s.status)
+  const rawKey = useLicenseStore((s) => s.rawKey)
+  const isGracePassing = status === 'grace' && rawKey !== ''
+  if (isGracePassing || status === 'active') return <>{children}</>
+  if (BLOCKING_STATUSES.has(status)) return <LicenseActivationPage />
+  // device_mismatch / seat_exceeded — show activation page with specific message
+  return <LicenseActivationPage />
 }
 
 /**
@@ -77,12 +84,16 @@ function RoleHomeRedirect() {
 export default function App() {
   const { load } = useSettingsStore()
   const { loadCurrentShift } = useShiftStore()
+  const revalidate = useLicenseStore((s) => s.revalidate)
 
   useEffect(() => {
     initializeDatabase()
     load()
     loadCurrentShift()
-  }, [load, loadCurrentShift])
+    // Revalidate license against server on every app startup.
+    // If offline, grace cache check runs inside revalidate().
+    revalidate()
+  }, [load, loadCurrentShift, revalidate])
 
   return (
     <LicenseGuard>
