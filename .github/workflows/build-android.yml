@@ -1,0 +1,60 @@
+name: Build and Release Android APK
+
+on:
+  push:
+    tags:
+      - 'v*.*.*' # Triggers when a new version tag is pushed, e.g., v1.0.0
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # LTS version
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17' # Recommended for Capacitor Android
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+        working-directory: ./CrossxPos
+
+      - name: Build Web Assets
+        run: npm run build
+        working-directory: ./CrossxPos
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+        working-directory: ./CrossxPos
+
+      - name: Set Android SDK Permissions
+        run: chmod +x gradlew
+        working-directory: ./CrossxPos/android
+
+      - name: Build Android Release APK
+        # assembleRelease without a signing config creates an unsigned release APK
+        run: ./gradlew assembleRelease
+        working-directory: ./CrossxPos/android
+
+      - name: Rename APK for Release
+        run: mv app/build/outputs/apk/release/app-release-unsigned.apk CrossxPos-Release-${{ github.ref_name }}.apk
+        working-directory: ./CrossxPos/android
+
+      - name: Create GitHub Release and Upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CrossxPos/android/CrossxPos-Release-${{ github.ref_name }}.apk
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

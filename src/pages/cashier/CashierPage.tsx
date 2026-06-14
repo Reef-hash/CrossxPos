@@ -11,7 +11,7 @@ import type { Product, Category, Table, OrderItem, ModifierGroup, ModifierOption
 import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, Minus, Trash2, Send, CreditCard, ShoppingCart, X, Banknote, Waves, Scissors, Lock, ArrowLeftRight, Merge } from 'lucide-react'
-import { printReceipt, printKitchenTicket } from '@/lib/printer'
+import { PrinterService } from '@/services/printer/PrinterService'
 
 export function CashierPage() {
   const { currentStaff } = useAuthStore()
@@ -171,7 +171,11 @@ export function CashierPage() {
     await sendToKitchen()
     navigate('/orders')
     if (settings.kitchenPrinter.enabled && orderSnapshot) {
-      printKitchenTicket(orderSnapshot, settings)
+      try {
+        await PrinterService.printKitchenTicket(orderSnapshot, settings)
+      } catch (err) {
+        console.error('Failed to print kitchen ticket:', err)
+      }
     }
   }
 
@@ -181,7 +185,11 @@ export function CashierPage() {
     setPaymentOpen(false)
     setAmountPaid('')
     setPaymentMethod('cash')
-    printReceipt(paidOrder, settings)
+    try {
+      await PrinterService.printReceipt(paidOrder, settings)
+    } catch (err) {
+      console.error('Failed to print receipt:', err)
+    }
   }
 
   const handleNumpad = (val: string) => {

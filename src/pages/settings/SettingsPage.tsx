@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Settings, Printer, Store, Wifi, KeyRound, AlertTriangle, CheckCircle2, UtensilsCrossed, X } from 'lucide-react'
 import type { AppSettings, PrinterProfile } from '@/types'
-import { testPrintReceipt, testPrintKitchen } from '@/lib/printer'
+import { PrinterService } from '@/services/printer/PrinterService'
 import { generateId } from '@/lib/utils'
 
 type SettingsTab = 'profile' | 'printer' | 'license'
@@ -124,7 +124,7 @@ export function SettingsPage() {
     setTestedPrinterSignature(null)
   }
 
-  const handleTestPrinterProfile = () => {
+  const handleTestPrinterProfile = async () => {
     const name = newPrinterName.trim()
     const ip = newPrinterIP.trim()
     const port = parseInt(newPrinterPort, 10) || 9100
@@ -133,10 +133,14 @@ export function SettingsPage() {
       return
     }
 
-    if (newPrinterRole === 'cashier') testPrintReceipt(form)
-    else testPrintKitchen(form)
+    try {
+      if (newPrinterRole === 'cashier') await PrinterService.testPrintReceipt(form)
+      else await PrinterService.testPrintKitchen(form)
 
-    setTestedPrinterSignature(`${name}|${ip}|${port}|${newPrinterRole}`)
+      setTestedPrinterSignature(`${name}|${ip}|${port}|${newPrinterRole}`)
+    } catch (err) {
+      console.error('Failed to test print:', err)
+    }
   }
 
   const handleRemovePrinterProfile = (profileId: string) => {
@@ -398,7 +402,7 @@ export function SettingsPage() {
               variant="outline"
               size="sm"
               className="w-full mt-1 text-xs"
-              onClick={() => testPrintReceipt(form)}
+              onClick={() => PrinterService.testPrintReceipt(form).catch((err) => console.error('Test print failed:', err))}
             >
               <Printer className="mr-1.5 h-3 w-3" /> Test Print Resit
             </Button>
@@ -457,7 +461,7 @@ export function SettingsPage() {
               variant="outline"
               size="sm"
               className="w-full mt-1 text-xs"
-              onClick={() => testPrintKitchen(form)}
+              onClick={() => PrinterService.testPrintKitchen(form).catch((err) => console.error('Test print failed:', err))}
             >
               <Printer className="mr-1.5 h-3 w-3" /> Test Print Tiket Dapur
             </Button>

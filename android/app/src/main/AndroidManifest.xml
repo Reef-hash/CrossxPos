@@ -36,6 +36,21 @@
     </application>
 
     <!-- Permissions -->
-
+    <!-- Internet (Wi-Fi Printing & General Access) -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Bluetooth (Legacy & BLE for Thermal Printing) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+
+    <!-- Android 12+ Bluetooth permissions -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Location (Required for BLE discovery on Android 11 and below) -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- USB Host (USB Printing) -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 </manifest>
