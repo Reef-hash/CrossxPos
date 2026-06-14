@@ -25,7 +25,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17' # Recommended for Capacitor Android
+          java-version: '21' # Required for Android build
 
       - name: Install Frontend Dependencies
         run: npm ci
