@@ -29,33 +29,30 @@ jobs:
 
       - name: Install Frontend Dependencies
         run: npm ci
-        working-directory: ./CrossxPos
 
       - name: Build Web Assets
         run: npm run build
-        working-directory: ./CrossxPos
 
       - name: Sync Capacitor Android
         run: npx cap sync android
-        working-directory: ./CrossxPos
 
       - name: Set Android SDK Permissions
         run: chmod +x gradlew
-        working-directory: ./CrossxPos/android
+        working-directory: ./android
 
       - name: Build Android Release APK
         # assembleRelease without a signing config creates an unsigned release APK
         run: ./gradlew assembleRelease
-        working-directory: ./CrossxPos/android
+        working-directory: ./android
 
       - name: Rename APK for Release
         run: mv app/build/outputs/apk/release/app-release-unsigned.apk CrossxPos-Release-${{ github.ref_name }}.apk
-        working-directory: ./CrossxPos/android
+        working-directory: ./android
 
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          files: CrossxPos/android/CrossxPos-Release-${{ github.ref_name }}.apk
+          files: android/CrossxPos-Release-${{ github.ref_name }}.apk
           generate_release_notes: true
           draft: false
           prerelease: false
