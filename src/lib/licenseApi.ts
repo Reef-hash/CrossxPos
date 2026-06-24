@@ -84,7 +84,11 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 
 function isNetworkError(err: unknown): boolean {
   if (err instanceof DOMException && err.name === 'AbortError') return true
-  if (err instanceof TypeError) return true // fetch network error
+  if (err instanceof TypeError) {
+    // Fetch throws TypeError for many reasons, including CORS failures.
+    // Only treat it as offline when the browser reports no network.
+    return typeof window !== 'undefined' && 'navigator' in window && !window.navigator.onLine
+  }
   return false
 }
 

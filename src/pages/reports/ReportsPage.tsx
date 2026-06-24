@@ -4,7 +4,8 @@ import { db } from '@/db'
 import { formatCurrency } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useAuthStore } from '@/store/authStore'
-import { BarChart3, TrendingUp, ShoppingBag, Banknote, Download, Calendar, Printer, Trash2 } from 'lucide-react'
+import { BarChart3, TrendingUp, ShoppingBag, Banknote, Download, Calendar, Printer, Trash2, ArrowLeft } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO } from 'date-fns'
@@ -513,6 +514,8 @@ export function ReportsPage() {
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
+  const navigate = useNavigate()
+
   return (
     <>
     <div className="p-5 grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-5 items-start">
@@ -524,6 +527,14 @@ export function ReportsPage() {
           <BarChart3 className="h-5 w-5 text-zinc-500" />
           <h1 className="text-base font-bold text-zinc-900">Laporan Jualan</h1>
         </div>
+        <button
+          onClick={() => navigate('/settings')}
+          className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-800"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to Settings
+        </button>
+      </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={orders.length === 0}>
             <Download className="mr-1.5 h-3.5 w-3.5" />
@@ -534,7 +545,6 @@ export function ReportsPage() {
             Laporan PDF
           </Button>
         </div>
-      </div>
 
       {/* Date Range Filter */}
       <Card>

@@ -118,11 +118,7 @@ export async function initializeDatabase() {
       currency: 'MYR',
       taxRate: 6,
       receiptFooter: 'Thank you for dining with us!',
-      receiptPrinter: { ip: '192.168.1.100', port: 9100, enabled: false },
-      kitchenPrinter: { ip: '192.168.1.101', port: 9100, enabled: false },
       kitchenStations: ['Kitchen', 'Bar'],
-      printerProfiles: [],
-      stationPrinterMap: {},
     })
   }
 

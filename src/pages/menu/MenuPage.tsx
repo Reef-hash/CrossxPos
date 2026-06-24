@@ -1,5 +1,6 @@
 ﻿import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { db } from '@/db'
 import type { Category, Product, ModifierGroup, ModifierOption } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -7,11 +8,12 @@ import { Input } from '@/components/ui/input'
 import { formatCurrency, generateId } from '@/lib/utils'
 import { useLicenseStore } from '@/store/licenseStore'
 import { formatLimit } from '@/lib/license'
-import { Plus, Pencil, Trash2, UtensilsCrossed, Settings2, Tag, ImagePlus, Eye, EyeOff, X, Check, GripVertical, Copy } from 'lucide-react'
+import { Plus, Pencil, Trash2, UtensilsCrossed, Settings2, Tag, ImagePlus, Eye, EyeOff, X, Check, GripVertical, Copy, ArrowLeft } from 'lucide-react'
 
 type View = 'products' | 'modifiers'
 
 export function MenuPage() {
+  const navigate = useNavigate()
   const [view, setView] = useState<View>('products')
 
   // --- Products state ---
@@ -272,6 +274,13 @@ export function MenuPage() {
     <div className="flex h-full">
       {/* Sidebar */}
       <div className="flex w-56 shrink-0 flex-col border-r border-zinc-200/80 bg-white">
+        <button
+          onClick={() => navigate('/settings')}
+          className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-zinc-500 hover:text-zinc-800 border-b border-zinc-200/80"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to Settings
+        </button>
         <div className="flex gap-1 border-b border-zinc-200/80 p-2">
           <button
             onClick={() => setView('products')}

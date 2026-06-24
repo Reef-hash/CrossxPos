@@ -17,6 +17,7 @@ import { MenuPage } from '@/pages/menu/MenuPage'
 import { OrdersPage } from '@/pages/orders/OrdersPage'
 import { ReportsPage } from '@/pages/reports/ReportsPage'
 import { StaffPage } from '@/pages/staff/StaffPage'
+import { ShiftPage } from '@/pages/shifts/ShiftPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 
 /** Statuses that block access and require activation or renewal. */
@@ -116,6 +117,7 @@ export default function App() {
           <Route path="menu"     element={<RoleRoute allowedRoles={['admin']}><MenuPage /></RoleRoute>} />
           <Route path="reports"  element={<RoleRoute allowedRoles={['admin']}><ReportsPage /></RoleRoute>} />
           <Route path="staff"    element={<RoleRoute allowedRoles={['admin', 'cashier']}><StaffPage /></RoleRoute>} />
+          <Route path="shifts"   element={<RoleRoute allowedRoles={['admin', 'cashier']}><ShiftPage /></RoleRoute>} />
           <Route path="settings" element={<RoleRoute allowedRoles={['admin']}><SettingsPage /></RoleRoute>} />
           <Route path="unauthorized" element={<UnauthorizedPage />} />
         </Route>

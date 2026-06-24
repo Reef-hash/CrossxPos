@@ -1,188 +1,465 @@
 /**
- * CrossxPOS — ESC/POS Byte Builder
+ * CrossxPOS ESC/POS Command Builder
  *
- * Builds raw ESC/POS byte sequences for thermal printers.
- * Used with the local print bridge (scripts/print-bridge.mjs) for
- * direct WiFi/LAN printing without a browser print dialog.
+ * Pure-JS ESC/POS command builder for thermal receipt printers.
+ * Generates byte arrays that can be sent via Network (TCP), Bluetooth (SPP), or USB.
  *
- * Compatible with standard ESC/POS printers (Epson, Xprinter, GOOJPRT, etc.)
- * Target paper: 80mm (42-char line at normal font)
+ * Reference: EPSON ESC/POS Application Programming Guide
+ * Paper widths: 58mm = 384 dots, 80mm = 576 dots (at 203 dpi)
  */
 
-import type { Order, AppSettings } from '@/types'
-
-// ─── ESC/POS Command Constants ────────────────────────────────────────────────
+// ─── ESC/POS Commands ─────────────────────────────────────────────────────────
 
 const ESC = 0x1b
-const GS  = 0x1d
+const GS = 0x1d
+const LF = 0x0a
+const CR = 0x0d
 
-const ESC_INIT         = [ESC, 0x40]          // Initialise printer
-const ESC_ALIGN_LEFT   = [ESC, 0x61, 0x00]    // Left align
-const ESC_ALIGN_CENTER = [ESC, 0x61, 0x01]    // Center align
-const ESC_BOLD_ON      = [ESC, 0x45, 0x01]    // Bold on
-const ESC_BOLD_OFF     = [ESC, 0x45, 0x00]    // Bold off
-const ESC_FONT_TALL    = [GS,  0x21, 0x01]    // Double height
-const ESC_FONT_BIG     = [GS,  0x21, 0x11]    // Double width + double height
-const ESC_FONT_NORMAL  = [GS,  0x21, 0x00]    // Normal font size
-const LF               = [0x0a]               // Line feed
-const CUT              = [GS,  0x56, 0x41, 0x03]  // Partial cut + feed
+const CMD = {
+  INIT:          [ESC, 0x40],                     // Initialize printer
+  ALIGN_LEFT:    [ESC, 0x61, 0x00],
+  ALIGN_CENTER:  [ESC, 0x61, 0x01],
+  ALIGN_RIGHT:   [ESC, 0x61, 0x02],
+  BOLD_ON:       [ESC, 0x45, 0x01],
+  BOLD_OFF:      [ESC, 0x45, 0x00],
+  UNDERLINE_ON:  [ESC, 0x2d, 0x01],
+  UNDERLINE_OFF: [ESC, 0x2d, 0x00],
+  DOUBLE_HEIGHT: [ESC, 0x21, 0x10],               // 2x height
+  DOUBLE_WIDTH:  [ESC, 0x21, 0x20],               // 2x width
+  NORMAL_SIZE:   [ESC, 0x21, 0x00],
+  LINE_SPACING:  (n: number) => [ESC, 0x33, n],
+  FEED:          (n: number) => [ESC, 0x64, n],   // Feed n lines
+  CUT_PARTIAL:   [GS, 0x56, 0x41, 0x00],         // Partial cut (most common)
+  CUT_FULL:      [GS, 0x56, 0x41, 0x01],         // Full cut
+  DRAWER_KICK:   [ESC, 0x70, 0x00, 0x64, 0x64],  // Kick cash drawer on pin 2
+  DIVIDER:       (char: string, width: number) => [char.repeat(width)],
+  TABLE_SPACING: [0x09],                          // Tab (horizontal)
+  // Barcode
+  BARCODE_HRI_BELOW: [GS, 0x48, 0x02],           // Human-readable below
+  BARCODE_WIDTH:  (n: number) => [GS, 0x77, n],
+  BARCODE_HEIGHT: (n: number) => [GS, 0x68, n],
+  BARCODE_PRINT:  (data: string) => [GS, 0x6b, 0x45, data.length, ...toBytes(data)],
+} as const
 
-const LINE_WIDTH = 42  // characters per 80mm line at normal font
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// ─── Internal Builder ─────────────────────────────────────────────────────────
-
-class EscPosDoc {
-  private readonly buf: number[] = []
-  private readonly enc = new TextEncoder()
-
-  append(bytes: number[]): this { this.buf.push(...bytes); return this }
-  text(s: string): this         { this.buf.push(...this.enc.encode(s)); return this }
-  lf(): this                    { this.buf.push(...LF); return this }
-
-  center(s: string): this {
-    return this.append(ESC_ALIGN_CENTER).text(s).lf().append(ESC_ALIGN_LEFT)
-  }
-
-  centerBold(s: string): this {
-    return this
-      .append(ESC_ALIGN_CENTER)
-      .append(ESC_BOLD_ON).text(s).append(ESC_BOLD_OFF)
-      .lf().append(ESC_ALIGN_LEFT)
-  }
-
-  centerBig(s: string): this {
-    return this
-      .append(ESC_ALIGN_CENTER)
-      .append(ESC_FONT_BIG).text(s).append(ESC_FONT_NORMAL)
-      .lf().append(ESC_ALIGN_LEFT)
-  }
-
-  centerTall(s: string): this {
-    return this
-      .append(ESC_ALIGN_CENTER)
-      .append(ESC_FONT_TALL).text(s).append(ESC_FONT_NORMAL)
-      .lf().append(ESC_ALIGN_LEFT)
-  }
-
-  divider(): this {
-    return this.text('-'.repeat(LINE_WIDTH)).lf()
-  }
-
-  row(left: string, right: string, bold = false): this {
-    const gap  = Math.max(1, LINE_WIDTH - left.length - right.length)
-    const line = left + ' '.repeat(gap) + right
-    if (bold) this.append(ESC_BOLD_ON)
-    this.text(line).lf()
-    if (bold) this.append(ESC_BOLD_OFF)
-    return this
-  }
-
-  build(): Uint8Array { return new Uint8Array(this.buf) }
+function toBytes(str: string): number[] {
+  const encoder = new TextEncoder()
+  return Array.from(encoder.encode(str))
 }
 
-// ─── Kitchen Ticket ───────────────────────────────────────────────────────────
+function repeat(byte: number, count: number): number[] {
+  return new Array(count).fill(byte)
+}
 
 /**
- * Builds ESC/POS bytes for a kitchen order ticket (KOT).
- * Large order number + table + bold item list — no prices.
+ * Get the max character width for a given paper width in mm.
+ * Uses standard 12x24 font (~12 chars per inch).
  */
-export function buildKitchenEscPos(order: Order, stationName?: string): Uint8Array {
-  const timeStr = new Date().toLocaleTimeString('en-MY', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
+export function getPaperWidth(chars: 58 | 80): number {
+  return chars === 80 ? 48 : 32
+}
 
-  const doc = new EscPosDoc()
-  doc.append(ESC_INIT).lf()
+// ─── EscPosBuilder ────────────────────────────────────────────────────────────
+
+export class EscPosBuilder {
+  private buffer: number[] = []
+  private _paperWidth: number
+
+  constructor(paperWidthMm: 58 | 80 = 58) {
+    this._paperWidth = paperWidthMm
+    // Initialize printer
+    this.add(...CMD.INIT)
+  }
+
+  private add(...bytes: (number | number[])[]): this {
+    for (const b of bytes) {
+      if (Array.isArray(b)) {
+        this.buffer.push(...b)
+      } else {
+        this.buffer.push(b)
+      }
+    }
+    return this
+  }
+
+  // ─── Build / Output ───────────────────────────────────────────────────
+
+  /** Returns the ESC/POS byte array */
+  toBytes(): Uint8Array {
+    return new Uint8Array(this.buffer)
+  }
+
+  /** Returns base64-encoded string for wire transfer */
+  toBase64(): string {
+    return btoa(String.fromCharCode(...this.buffer))
+  }
+
+  /** Returns a Blob for download / debug */
+  toBlob(): Blob {
+    return new Blob([this.toBytes()], { type: 'application/octet-stream' })
+  }
+
+  // ─── Text ─────────────────────────────────────────────────────────────
+
+  text(str: string, wrap = true): this {
+    if (wrap) {
+      const width = getPaperWidth(this._paperWidth)
+      const lines = this.wrapText(str, width)
+      for (const line of lines) {
+        this.add(...toBytes(line), LF)
+      }
+    } else {
+      this.add(...toBytes(str))
+    }
+    return this
+  }
+
+  textLine(str: string): this {
+    return this.text(str).add(LF)
+  }
+
+  /** Bold text line */
+  boldLine(str: string): this {
+    return this
+      .add(...CMD.BOLD_ON)
+      .text(str)
+      .add(...CMD.BOLD_OFF, LF)
+  }
+
+  /** Double-height text (e.g., order type header) */
+  doubleLine(str: string): this {
+    return this
+      .add(...CMD.DOUBLE_HEIGHT, ...CMD.BOLD_ON)
+      .text(str)
+      .add(...CMD.BOLD_OFF, ...CMD.NORMAL_SIZE, LF)
+  }
+
+  // ─── Alignment ────────────────────────────────────────────────────────
+
+  left(): this {
+    return this.add(...CMD.ALIGN_LEFT)
+  }
+  center(): this {
+    return this.add(...CMD.ALIGN_CENTER)
+  }
+  right(): this {
+    return this.add(...CMD.ALIGN_RIGHT)
+  }
+
+  /** Center-aligned text line(s) */
+  centered(str: string): this {
+    return this.center().text(str).left()
+  }
+
+  // ─── Formatting ───────────────────────────────────────────────────────
+
+  bold(str: string): this {
+    return this.add(...CMD.BOLD_ON).text(str, false).add(...CMD.BOLD_OFF)
+  }
+
+  underline(str: string): this {
+    return this.add(...CMD.UNDERLINE_ON).text(str, false).add(...CMD.UNDERLINE_OFF)
+  }
+
+  /** Horizontal divider line */
+  divider(char = '-', width?: number): this {
+    const w = width ?? getPaperWidth(this._paperWidth)
+    return this.text(char.repeat(w))
+  }
+
+  // ─── Spaces / Padding ─────────────────────────────────────────────────
+
+  /** Empty line */
+  blank(n = 1): this {
+    for (let i = 0; i < n; i++) {
+      this.add(LF)
+    }
+    return this
+  }
+
+  /** Two-column layout: left text | right text */
+  twoColumn(left: string, right: string): this {
+    const width = getPaperWidth(this._paperWidth)
+    const leftWidth = width - right.length - 2
+    const leftPadded = left.slice(0, leftWidth).padEnd(leftWidth, ' ')
+    return this.text(`${leftPadded} ${right}`)
+  }
+
+  /** Item line: qty x name ... price */
+  itemLine(qty: number, name: string, price: string): this {
+    const width = getPaperWidth(this._paperWidth)
+    const qtyStr = qty > 1 ? `${qty}x ` : ''
+    const maxNameWidth = width - qtyStr.length - price.length - 3
+    const namePadded = name.slice(0, maxNameWidth).padEnd(maxNameWidth, '.')
+    return this.text(`${qtyStr}${namePadded} ${price}`)
+  }
+
+  // ─── Barcode ──────────────────────────────────────────────────────────
+
+  barcode(data: string, width = 3, height = 162): this {
+    return this
+      .add(...CMD.BARCODE_HRI_BELOW)
+      .add(...CMD.BARCODE_WIDTH(width))
+      .add(...CMD.BARCODE_HEIGHT(height))
+      .add(...CMD.BARCODE_PRINT(data))
+      .add(LF)
+  }
+
+  // ─── Feed & Cut ───────────────────────────────────────────────────────
+
+  feed(n = 1): this {
+    return this.add(...CMD.FEED(n))
+  }
+
+  cut(partial = true): this {
+    return this.add(...(partial ? CMD.CUT_PARTIAL : CMD.CUT_FULL))
+  }
+
+  // ─── Drawer ───────────────────────────────────────────────────────────
+
+  kickDrawer(): this {
+    return this.add(...CMD.DRAWER_KICK)
+  }
+
+  // ─── Private ──────────────────────────────────────────────────────────
+
+  /**
+   * Simple word-wrapping for monospaced thermal printers.
+   * Splits on word boundaries where possible, falls back to hard break.
+   */
+  private wrapText(text: string, maxWidth: number): string[] {
+    const lines: string[] = []
+    const paragraphs = text.split('\n')
+
+    for (const para of paragraphs) {
+      if (para.length === 0) {
+        lines.push('')
+        continue
+      }
+      let remaining = para
+      while (remaining.length > maxWidth) {
+        // Try to break at last space within limit
+        let breakAt = remaining.lastIndexOf(' ', maxWidth)
+        if (breakAt <= 0) {
+          // No space found — hard break
+          breakAt = maxWidth
+        }
+        lines.push(remaining.slice(0, breakAt).trimEnd())
+        remaining = remaining.slice(breakAt).trimStart()
+      }
+      if (remaining.length > 0) {
+        lines.push(remaining)
+      }
+    }
+
+    return lines
+  }
+}
+
+// ─── Receipt Templates ────────────────────────────────────────────────────────
+
+export interface ReceiptData {
+  restaurantName: string
+  orderNumber: number
+  orderType: string          // 'Dine In' | 'Takeaway'
+  tableNumber?: string
+  staffName: string
+  items: ReceiptItem[]
+  subtotal: number
+  tax: number
+  taxRate: number
+  discount: number
+  total: number
+  paymentMethod: string
+  amountPaid: number
+  change: number
+  currency: string
+  footer: string
+  date: Date
+  shiftId?: string
+}
+
+export interface ReceiptItem {
+  name: string
+  qty: number
+  price: number
+  modifiers?: string[]
+  note?: string
+}
+
+/**
+ * Build a customer receipt.
+ */
+export function buildReceipt(data: ReceiptData): EscPosBuilder {
+  const p = new EscPosBuilder(58)
+  const fmt = (n: number) => n.toFixed(2)
+  const time = data.date.toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' })
+  const d = data.date.toLocaleDateString('ms-MY')
 
   // Header
-  const title = stationName
-    ? `-- ${stationName.toUpperCase()} --`
-    : '-- KITCHEN ORDER --'
-  doc.centerBold(title)
-  doc.centerBig(`#${order.orderNumber}`)
-  doc.centerTall(order.type === 'dine_in' ? `MEJA ${order.tableNumber ?? ''}` : 'TAKE AWAY')
-  doc.center(timeStr)
-  doc.divider()
+  p.center().doubleLine(data.restaurantName)
+  p.centered(d)
+  p.centered(time)
+  p.blank()
+
+  // Order info
+  p.twoColumn(`Order #${data.orderNumber}`, data.orderType)
+  if (data.tableNumber) {
+    p.twoColumn('Table', data.tableNumber)
+  }
+  p.textLine(`Cashier: ${data.staffName}`)
+  p.divider()
 
   // Items
-  for (const item of order.items) {
-    doc.append(ESC_BOLD_ON).text(`${item.quantity}x ${item.productName}`).append(ESC_BOLD_OFF).lf()
-    for (const mod of item.modifiers) {
-      doc.text(`   + ${mod.optionName}`).lf()
+  p.left()
+  for (const item of data.items) {
+    if (item.qty > 1) {
+      p.text(`${item.qty}x `, false)
+    }
+    p.bold(item.name)
+    p.right().text(fmt(item.price))
+    p.left()
+
+    if (item.modifiers?.length) {
+      for (const mod of item.modifiers) {
+        p.text(`  + ${mod}`)
+      }
     }
     if (item.note) {
-      doc.append(ESC_BOLD_ON).text(`   ! ${item.note}`).append(ESC_BOLD_OFF).lf()
+      p.text(`  * ${item.note}`)
     }
   }
 
-  doc.divider()
-  doc.lf().lf().lf()
-  doc.append(CUT)
-
-  return doc.build()
-}
-
-// ─── Customer Receipt ─────────────────────────────────────────────────────────
-
-/**
- * Builds ESC/POS bytes for a customer receipt.
- * Full receipt with store name, items, totals, payment, footer.
- */
-export function buildReceiptEscPos(order: Order, settings: AppSettings): Uint8Array {
-  const date    = new Date(order.paidAt ?? order.createdAt)
-  const dateStr = date.toLocaleDateString('en-MY', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const timeStr = date.toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit', hour12: true })
-
-  const doc = new EscPosDoc()
-  doc.append(ESC_INIT).lf()
-
-  // Store header
-  doc.centerTall(settings.restaurantName)
-  doc.center(`${dateStr}  ${timeStr}`)
-  doc.center(`Order #${order.orderNumber}`)
-  doc.center(order.type === 'dine_in' ? `Dine In - Meja ${order.tableNumber ?? ''}` : 'Take Away')
-  doc.divider()
-
-  // Items
-  for (const item of order.items) {
-    const nameCol = `${item.quantity}x ${item.productName}`
-    doc.row(nameCol, `RM ${item.totalPrice.toFixed(2)}`)
-    for (const mod of item.modifiers) {
-      const modLabel = `  + ${mod.optionName}`
-      const modPrice = mod.price > 0 ? `+RM ${mod.price.toFixed(2)}` : ''
-      if (modPrice) doc.row(modLabel, modPrice)
-      else          doc.text(modLabel).lf()
-    }
-    if (item.note) {
-      doc.text(`  ! ${item.note}`).lf()
-    }
-  }
-
-  doc.divider()
+  p.divider()
 
   // Totals
-  doc.row('Subtotal', `RM ${order.subtotal.toFixed(2)}`)
-  doc.row(`Tax (${settings.taxRate}%)`, `RM ${order.tax.toFixed(2)}`)
-  if ((order.discount ?? 0) > 0) {
-    doc.row('Diskaun', `-RM ${(order.discount ?? 0).toFixed(2)}`)
+  p.twoColumn('Subtotal', fmt(data.subtotal))
+  if (data.tax > 0) {
+    p.twoColumn(`Tax (${data.taxRate}%)`, fmt(data.tax))
   }
-  doc.divider()
-  doc.row('JUMLAH', `RM ${order.total.toFixed(2)}`, true)
-  doc.divider()
+  if (data.discount > 0) {
+    p.twoColumn('Discount', `-${fmt(data.discount)}`)
+  }
+  p.divider('-')
+  p.boldLine(`TOTAL  ${fmt(data.total)}`)
 
   // Payment
-  if (order.paymentMethod === 'cash' && order.amountPaid != null) {
-    doc.row('Tunai', `RM ${order.amountPaid.toFixed(2)}`)
-    doc.row('Baki',  `RM ${(order.change ?? 0).toFixed(2)}`)
+  p.twoColumn(data.paymentMethod, fmt(data.amountPaid))
+  if (data.change > 0) {
+    p.twoColumn('Change', fmt(data.change))
   }
 
   // Footer
-  doc.lf()
-  doc.center(settings.receiptFooter || 'Terima kasih atas kunjungan anda!')
-  doc.lf().lf().lf()
-  doc.append(CUT)
+  p.blank()
+  p.centered(data.footer)
+  p.centered('Thank You!')
 
-  return doc.build()
+  // Shift ID for tracking
+  if (data.shiftId) {
+    p.blank()
+    p.centered(`Shift: ${data.shiftId.slice(0, 8)}`)
+  }
+
+  // Cut
+  p.feed(3)
+  p.cut()
+
+  return p
+}
+
+// ─── Kitchen Ticket Templates (KOT) ───────────────────────────────────────────
+
+export interface KOTData {
+  restaurantName: string
+  orderNumber: number
+  orderType: string
+  tableNumber?: string
+  staffName: string
+  station: string          // e.g. 'Kitchen', 'Bar'
+  items: KOTItem[]
+  note?: string
+  date: Date
+}
+
+export interface KOTItem {
+  name: string
+  qty: number
+  modifiers?: string[]
+  note?: string
+}
+
+/**
+ * Build a Kitchen Order Ticket for one station.
+ * KOTs are double-height + bold for visibility in kitchen.
+ */
+export function buildKOT(data: KOTData): EscPosBuilder {
+  const p = new EscPosBuilder(80) // Kitchen printers usually 80mm
+  const time = data.date.toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' })
+
+  // Double-strike header — very visible
+  p.center()
+  p.add(...CMD.DOUBLE_HEIGHT, ...CMD.DOUBLE_WIDTH, ...CMD.BOLD_ON)
+  p.textLine(data.station.toUpperCase())
+  p.add(...CMD.NORMAL_SIZE, ...CMD.BOLD_OFF)
+
+  // Order info
+  p.left()
+  p.boldLine(`Order #${data.orderNumber}  [${data.orderType}]`)
+  if (data.tableNumber) {
+    p.boldLine(`Table: ${data.tableNumber}`)
+  }
+  p.textLine(`By: ${data.staffName}  ${time}`)
+  p.divider('=')
+
+  // Items — large and bold
+  p.add(...CMD.BOLD_ON)
+  for (const item of data.items) {
+    const qtyLabel = item.qty > 1 ? `[${item.qty}x] ` : ''
+    p.textLine(`${qtyLabel}${item.name}`)
+
+    if (item.modifiers?.length) {
+      p.add(...CMD.BOLD_OFF)
+      for (const mod of item.modifiers) {
+        p.textLine(`   └ ${mod}`)
+      }
+      p.add(...CMD.BOLD_ON)
+    }
+    if (item.note) {
+      p.add(...CMD.BOLD_OFF)
+      p.textLine(`   * ${item.note}`)
+      p.add(...CMD.BOLD_ON)
+    }
+  }
+  p.add(...CMD.BOLD_OFF)
+  p.divider('=')
+
+  if (data.note) {
+    p.textLine(`Note: ${data.note}`)
+    p.divider('=')
+  }
+
+  // Footer timestamp
+  p.blank()
+  p.centered(`Printed: ${time}`)
+  p.feed(2)
+  p.cut()
+
+  return p
+}
+
+// ─── Cash Drawer Open ─────────────────────────────────────────────────────────
+
+/** Build a minimal command to open the cash drawer. */
+export function buildDrawerKick(): EscPosBuilder {
+  return new EscPosBuilder(58).kickDrawer()
+}
+
+// ─── Utility ──────────────────────────────────────────────────────────────────
+
+/**
+ * Convert any EscPosBuilder to base64 for the print-bridge HTTP API.
+ */
+export function builderToBase64(builder: EscPosBuilder): string {
+  return builder.toBase64()
 }

@@ -10,13 +10,15 @@ import { useLicenseStore } from '@/store/licenseStore'
 import type { Product, Category, Table, OrderItem, ModifierGroup, ModifierOption, OrderItemModifier } from '@/types'
 import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/utils'
+import { printerService } from '@/services/printer/PrinterService'
+import { usePrinterStore } from '@/services/printer/usePrinterStore'
+import type { ReceiptData, KOTData, KOTItem } from '@/lib/escpos'
 import { Plus, Minus, Trash2, Send, CreditCard, ShoppingCart, X, Banknote, Waves, Scissors, Lock, ArrowLeftRight, Merge } from 'lucide-react'
-import { PrinterService } from '@/services/printer/PrinterService'
-
 export function CashierPage() {
   const { currentStaff } = useAuthStore()
   const { currentShift } = useShiftStore()
   const { settings } = useSettingsStore()
+  const printerStore = usePrinterStore()
   const { activeOrder, startOrder, addItem, updateQuantity, removeItem, sendToKitchen, processPayment, setDiscount, transferTable, mergeFrom } =
     useCartStore()
 
@@ -167,29 +169,116 @@ export function CashierPage() {
   )
 
   const handleKOT = async () => {
-    const orderSnapshot = activeOrder
+    const order = activeOrder // capture before cleared by sendToKitchen
     await sendToKitchen()
-    navigate('/orders')
-    if (settings.kitchenPrinter.enabled && orderSnapshot) {
+
+    // ─── Print KOT to kitchen printers ───────────────────────────────
+    if (order) {
       try {
-        await PrinterService.printKitchenTicket(orderSnapshot, settings)
+        await printKOTForOrder(order)
       } catch (err) {
-        console.error('Failed to print kitchen ticket:', err)
+        console.warn('[Cashier] KOT print failed:', err)
+        // Don't block the KOT flow — print failure is non-critical
       }
     }
+
+    navigate('/orders')
   }
 
   const handlePayment = async (method: 'cash' | 'card' | 'qr') => {
     const paid = method === 'cash' ? (parseFloat(amountPaid) || total) : total
-    const paidOrder = await processPayment(method, paid, settings.taxRate)
+    const completedOrder = await processPayment(method, paid, settings.taxRate)
     setPaymentOpen(false)
     setAmountPaid('')
     setPaymentMethod('cash')
+
+    // ─── Print receipt ───────────────────────────────────────────────
     try {
-      await PrinterService.printReceipt(paidOrder, settings)
+      await printReceiptForOrder(completedOrder, method, paid)
     } catch (err) {
-      console.error('Failed to print receipt:', err)
+      console.warn('[Cashier] Receipt print failed:', err)
     }
+  }
+
+  // ─── Print helpers ─────────────────────────────────────────────────────
+
+  const printKOTForOrder = async (order: typeof activeOrder) => {
+    if (!order) return
+
+    const { printers, stationPrinters } = printerStore
+
+    // Group items by kitchen station
+    const stationItems = new Map<string, KOTItem[]>()
+    for (const item of order.items) {
+      const station = item.kitchenStation || 'Kitchen'
+      if (!stationItems.has(station)) stationItems.set(station, [])
+      stationItems.get(station)!.push({
+        name: item.productName,
+        qty: item.quantity,
+        modifiers: item.modifiers?.map((m) => m.optionName),
+        note: item.note,
+      })
+    }
+
+    // Print each station to its assigned printer
+    for (const [station, items] of stationItems) {
+      const mapping = stationPrinters.find((sp) => sp.station === station)
+      if (!mapping) continue
+
+      const printer = printers.find((p) => p.id === mapping.printerId && p.isActive)
+      if (!printer) continue
+
+      const kotData: KOTData = {
+        restaurantName: settings.restaurantName,
+        orderNumber: order.orderNumber,
+        orderType: order.type === 'dine_in' ? 'Dine In' : 'Takeaway',
+        tableNumber: order.tableNumber,
+        staffName: order.staffName,
+        station,
+        items,
+        note: order.note,
+        date: new Date(),
+      }
+
+      await printerService.printKOT(printer, kotData)
+    }
+  }
+
+  const printReceiptForOrder = async (order: typeof activeOrder, method: 'cash' | 'card' | 'qr', amountPaidVal: number) => {
+    if (!order) return
+
+    const { printers, receiptPrinterId } = printerStore
+    const printer = printers.find((p) => p.id === receiptPrinterId && p.isActive)
+    if (!printer) return // No receipt printer configured — silent skip
+
+    const receiptData: ReceiptData = {
+      restaurantName: settings.restaurantName,
+      orderNumber: order.orderNumber,
+      orderType: order.type === 'dine_in' ? 'Dine In' : 'Takeaway',
+      tableNumber: order.tableNumber,
+      staffName: order.staffName,
+      items: order.items.map((i) => ({
+        name: i.productName,
+        qty: i.quantity,
+        price: i.totalPrice,
+        modifiers: i.modifiers?.map((m) => m.optionName),
+        note: i.note,
+      })),
+      subtotal: order.subtotal,
+      tax: order.tax,
+      taxRate: settings.taxRate,
+      discount: order.discount,
+      total: order.total,
+      paymentMethod: method === 'cash' ? 'Cash' : method === 'card' ? 'Card' : 'QR Pay',
+      amountPaid: order.amountPaid ?? amountPaidVal,
+      change: order.change ?? 0,
+      currency: settings.currency,
+      footer: settings.receiptFooter,
+      date: new Date(),
+      shiftId: order.shiftId,
+    }
+
+    await printerService.printReceipt(printer, receiptData)
   }
 
   const handleNumpad = (val: string) => {
@@ -272,10 +361,10 @@ export function CashierPage() {
             <h2 className="text-base font-bold text-zinc-900">Shift Belum Dibuka</h2>
             <p className="text-sm text-zinc-500">Sila buka shift dahulu sebelum<br />memproses sebarang jualan.</p>
             <button
-              onClick={() => navigate('/staff')}
+              onClick={() => navigate('/shifts')}
               className="mt-1 rounded-xl bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-700 transition"
             >
-              Pergi ke Halaman Staff
+              Buka Shift
             </button>
           </div>
         </div>

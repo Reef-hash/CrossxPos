@@ -17,7 +17,7 @@ CrossxPos/
 │   ├── lib/
 │   │   ├── utils.ts             # cn(), formatCurrency(), generateId(), generateOrderNumber()
 │   │   ├── license.ts           # HMAC-SHA256 verifikasi lesen (Web Crypto API)
-│   │   └── printer.ts           # Receipt/kitchen ticket HTML builder + window.print()
+│   │   └── escpos.ts            # ESC/POS command builder (receipts, KOT, drawer kick)
 │   │
 │   ├── db/
 │   │   └── index.ts             # Dexie DB class + initializeDatabase() seed
@@ -28,6 +28,16 @@ CrossxPos/
 │   │   ├── licenseStore.ts      # License state + limit checks (persisted)
 │   │   ├── settingsStore.ts     # AppSettings sync dengan DB (persisted)
 │   │   └── shiftStore.ts        # Shift open/close, currentShift (persisted)
+│   │
+│   ├── services/
+│   │   └── printer/
+│   │       ├── PrinterService.ts         # Singleton orchestrator: format → route → print
+│   │       ├── usePrinterStore.ts        # Zustand persisted printer config store
+│   │       └── connections/
+│   │           ├── BaseConnection.ts     # IPrinterConnection interface
+│   │           ├── NetworkPrinter.ts     # TCP via print-bridge (HTTP POST)
+│   │           ├── BluetoothPrinter.ts   # SPP via Capacitor plugin (stub)
+│   │           └── BluetoothScanner.ts  # TS bridge for native BT scanner plugin
 │   │
 │   ├── components/
 │   │   ├── ui/                  # Reusable UI atoms (shadcn-style)
@@ -61,8 +71,11 @@ CrossxPos/
 │       │   └── ReportsPage.tsx  # Jualan: date range, hourly chart, top products, kategori, CSV export
 │       ├── staff/
 │       │   └── StaffPage.tsx    # CRUD staff, assign role & PIN
-│       └── settings/
-│           └── SettingsPage.tsx # Restaurant info, tax rate, printer config
+│       ├── settings/
+│       │   ├── SettingsPage.tsx      # HUB: General, Management, Hardware (including Printers)
+│       │   └── PrinterSettings.tsx   # Printer CRUD, scan, test, kitchen station mapping
+│       └── shifts/
+│           └── ShiftPage.tsx         # Open/close shift, cash float, shift history
 │
 ├── vite.config.ts               # Tailwind plugin + @ path alias
 ├── tsconfig.app.json            # paths alias @/* → src/*
@@ -78,6 +91,20 @@ User Action
 Page Component
     │
     ├─► Zustand Store  ──────────► Dexie DB (IndexedDB)
+    │       │
+    │       ▼
+    │   Local State (React)
+    │
+    ├─► PrinterService (singleton)
+    │       │
+    │       ├─► EscPosBuilder (format)
+    │       └─► IPrinterConnection
+    │               ├─► NetworkPrinter  → print-bridge.mjs → TCP :9100
+    │               ├─► BluetoothPrinter → Capacitor Plugin → Android BT
+    │               └─► USB (future)
+    │
+    ▼
+  IndexedDB / Printer Output
     │   (in-memory state)         (persisted to disk)
     │
     └─► useLiveQuery()  ◄────────► Dexie DB (reactive)

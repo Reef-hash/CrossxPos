@@ -1,138 +1,189 @@
 /**
- * usePrinterStore
+ * Printer Zustand Store
  *
- * Zustand store for printer state management (ViewModel pattern).
- * Manages active adapter, connection status, and provides methods for UI components.
+ * Persisted printer configuration.
+ * Holds:
+ * - List of configured printers (PrinterConfig[])
+ * - Printer profiles with station mapping
+ * - Which printer is used for receipts
+ * - Status of each printer (online/offline)
  */
 
-import { create } from 'zustand';
-import { PrinterFactory } from './PrinterFactory';
-import type { IPrinterAdapter, PrinterConfig, PrinterStatus, PrinterType, PrinterError } from './adapters/IPrinterAdapter';
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import type { PrinterConfig, PrinterProfile, StationPrinterMap } from '@/types'
+import { generateId } from '@/lib/utils'
+import { printerService } from './PrinterService'
 
-interface PrinterStoreState {
-  // State
-  activeType: PrinterType | null;
-  adapter: IPrinterAdapter | null;
-  status: PrinterStatus;
-  lastError: PrinterError | null;
-  config: PrinterConfig | null;
+// ─── State Shape ─────────────────────────────────────────────────────────────
+
+interface PrinterState {
+  /** All configured printers */
+  printers: PrinterConfig[]
+  /** Printer profiles (copy count, cutter, drawer settings) */
+  profiles: PrinterProfile[]
+  /** Which printer ID is used for customer receipts */
+  receiptPrinterId: string | null
+  /** Kitchen station → printer mapping */
+  stationPrinters: StationPrinterMap[]
+  /** Connection status: printerId → online/offline */
+  printerStatus: Record<string, 'online' | 'offline'>
 
   // Actions
-  setActiveType: (type: PrinterType) => void;
-  connect: (type: PrinterType, config: PrinterConfig) => Promise<void>;
-  disconnect: () => Promise<void>;
-  print: (data: Uint8Array) => Promise<void>;
-  clearError: () => void;
+  addPrinter: (config: Omit<PrinterConfig, 'id'>) => string
+  updatePrinter: (id: string, partial: Partial<PrinterConfig>) => void
+  removePrinter: (id: string) => void
+  setReceiptPrinter: (id: string | null) => void
+  setStationPrinter: (station: string, printerId: string) => void
+  removeStationPrinter: (station: string) => void
+  addProfile: (profile: Omit<PrinterProfile, 'id'>) => string
+  updateProfile: (id: string, partial: Partial<PrinterProfile>) => void
+  removeProfile: (id: string) => void
+  setPrinterStatus: (id: string, status: 'online' | 'offline') => void
+
+  // Helpers
+  getReceiptPrinter: () => PrinterConfig | null
+  getStationPrinter: (station: string) => PrinterConfig | null
+  getPrinterProfile: (printerId: string) => PrinterProfile | undefined
+
+  // Operations
+  testPrinter: (id: string) => Promise<void>
+  refreshPrinterStatus: () => Promise<void>
 }
 
-export const usePrinterStore = create<PrinterStoreState>((set, get) => ({
-  // Initial state
-  activeType: null,
-  adapter: null,
-  status: 'disconnected',
-  lastError: null,
-  config: null,
+// ─── Store ────────────────────────────────────────────────────────────────────
 
-  // Switch printer type and create new adapter
-  setActiveType: (type: PrinterType) => {
-    const newAdapter = PrinterFactory.createAdapter(type);
-    set({
-      activeType: type,
-      adapter: newAdapter,
-      status: newAdapter.getStatus(),
-      lastError: null,
-    });
-  },
+export const usePrinterStore = create<PrinterState>()(
+  persist(
+    (set, get) => ({
+      printers: [],
+      profiles: [],
+      receiptPrinterId: null,
+      stationPrinters: [],
+      printerStatus: {},
 
-  // Connect adapter with config
-  connect: async (type: PrinterType, config: PrinterConfig) => {
-    try {
-      let adapter = get().adapter;
+      // ─── CRUD ──────────────────────────────────────────────────────────
 
-      // Create new adapter if type changed
-      if (get().activeType !== type) {
-        adapter = PrinterFactory.createAdapter(type);
-        set({ activeType: type, adapter });
-      }
+      addPrinter: (config) => {
+        const id = generateId()
+        set((s) => ({ printers: [...s.printers, { ...config, id }] }))
+        return id
+      },
 
-      if (!adapter) throw new Error('Failed to create adapter');
+      updatePrinter: (id, partial) => {
+        set((s) => ({
+          printers: s.printers.map((p) => (p.id === id ? { ...p, ...partial } : p)),
+        }))
+      },
 
-      set({ status: 'connecting', lastError: null, config });
-      await adapter.connect(config);
+      removePrinter: (id) => {
+        set((s) => ({
+          printers: s.printers.filter((p) => p.id !== id),
+          profiles: s.profiles.filter((p) => p.printerId !== id),
+          stationPrinters: s.stationPrinters.filter((sp) => sp.printerId !== id),
+          receiptPrinterId: s.receiptPrinterId === id ? null : s.receiptPrinterId,
+          printerStatus: deleteKey(s.printerStatus, id),
+        }))
+      },
 
-      set({
-        status: adapter.getStatus(),
-        config,
-      });
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      const lastError: PrinterError = {
-        code: 'CONNECTION_ERROR',
-        message: error.message,
-        timestamp: new Date(),
-      };
-      set({
-        status: 'error',
-        lastError,
-      });
-      throw lastError;
+      setReceiptPrinter: (id) => set({ receiptPrinterId: id }),
+
+      setStationPrinter: (station, printerId) => {
+        set((s) => {
+          const existing = s.stationPrinters.find((sp) => sp.station === station)
+          if (existing) {
+            return {
+              stationPrinters: s.stationPrinters.map((sp) =>
+                sp.station === station ? { ...sp, printerId } : sp
+              ),
+            }
+          }
+          return {
+            stationPrinters: [...s.stationPrinters, { station, printerId }],
+          }
+        })
+      },
+
+      removeStationPrinter: (station) => {
+        set((s) => ({
+          stationPrinters: s.stationPrinters.filter((sp) => sp.station !== station),
+        }))
+      },
+
+      addProfile: (profile) => {
+        const id = generateId()
+        set((s) => ({ profiles: [...s.profiles, { ...profile, id }] }))
+        return id
+      },
+
+      updateProfile: (id, partial) => {
+        set((s) => ({
+          profiles: s.profiles.map((p) => (p.id === id ? { ...p, ...partial } : p)),
+        }))
+      },
+
+      removeProfile: (id) => {
+        set((s) => ({ profiles: s.profiles.filter((p) => p.id !== id) }))
+      },
+
+      setPrinterStatus: (id, status) => {
+        set((s) => ({ printerStatus: { ...s.printerStatus, [id]: status } }))
+      },
+
+      // ─── Helpers ───────────────────────────────────────────────────────
+
+      getReceiptPrinter: () => {
+        const { printers, receiptPrinterId } = get()
+        return printers.find((p) => p.id === receiptPrinterId && p.isActive) ?? null
+      },
+
+      getStationPrinter: (station) => {
+        const { printers, stationPrinters } = get()
+        const map = stationPrinters.find((sp) => sp.station === station)
+        if (!map) return null
+        return printers.find((p) => p.id === map.printerId && p.isActive) ?? null
+      },
+
+      getPrinterProfile: (printerId) => {
+        return get().profiles.find((p) => p.printerId === printerId)
+      },
+
+      // ─── Operations ────────────────────────────────────────────────────
+
+      testPrinter: async (id) => {
+        const printer = get().printers.find((p) => p.id === id)
+        if (!printer) return
+        try {
+          await printerService.testPrint(printer)
+          set((s) => ({ printerStatus: { ...s.printerStatus, [id]: 'online' } }))
+        } catch (err) {
+          console.warn(`[PrinterStore] Test failed for ${printer.name}:`, err)
+          set((s) => ({ printerStatus: { ...s.printerStatus, [id]: 'offline' } }))
+          throw err
+        }
+      },
+
+      refreshPrinterStatus: async () => {
+        // Placeholder: in future, check each printer's connectivity
+        // For now, status is updated by testPrint / actual print operations
+      },
+    }),
+    {
+      name: 'printer-store',
+      // Only persist config, not status
+      partialize: (state) => ({
+        printers: state.printers,
+        profiles: state.profiles,
+        receiptPrinterId: state.receiptPrinterId,
+        stationPrinters: state.stationPrinters,
+      }),
     }
-  },
+  )
+)
 
-  // Disconnect adapter
-  disconnect: async () => {
-    try {
-      const { adapter } = get();
-      if (adapter) {
-        await adapter.disconnect();
-      }
-      set({
-        status: 'disconnected',
-        adapter: null,
-        activeType: null,
-        config: null,
-        lastError: null,
-      });
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      const lastError: PrinterError = {
-        code: 'DISCONNECT_ERROR',
-        message: error.message,
-        timestamp: new Date(),
-      };
-      set({ lastError });
-      throw lastError;
-    }
-  },
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  // Send data to printer
-  print: async (data: Uint8Array) => {
-    try {
-      const { adapter, status } = get();
-
-      if (!adapter || status !== 'ready') {
-        throw new Error('Printer not ready. Current status: ' + status);
-      }
-
-      await adapter.print(data);
-      set({ status: adapter.getStatus() });
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      const lastError: PrinterError = {
-        code: 'PRINT_ERROR',
-        message: error.message,
-        timestamp: new Date(),
-      };
-      set({
-        status: 'error',
-        lastError,
-      });
-      throw lastError;
-    }
-  },
-
-  // Clear the last error
-  clearError: () => {
-    set({ lastError: null });
-  },
-}));
+function deleteKey<T extends Record<string, unknown>>(obj: T, key: string): T {
+  const { [key]: _, ...rest } = obj
+  return rest as T
+}

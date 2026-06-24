@@ -1,5 +1,30 @@
 apply plugin: 'com.android.application'
 
+// Read version from version.properties
+def getVersionCode() {
+    try {
+        def versionFile = file('../version.properties')
+        def props = new Properties()
+        props.load(new FileInputStream(versionFile))
+        return props.getProperty('versionCode', '2').toInteger()
+    } catch (Exception e) {
+        logger.warn("Failed to read versionCode from version.properties: " + e.message)
+        return 2
+    }
+}
+
+def getVersionName() {
+    try {
+        def versionFile = file('../version.properties')
+        def props = new Properties()
+        props.load(new FileInputStream(versionFile))
+        return props.getProperty('versionName', '1.1')
+    } catch (Exception e) {
+        logger.warn("Failed to read versionName from version.properties: " + e.message)
+        return '1.1'
+    }
+}
+
 android {
     namespace = "com.crossxpos.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +32,8 @@ android {
         applicationId "com.crossxpos.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.1"
+        versionCode getVersionCode()
+        versionName getVersionName()
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -21,11 +46,31 @@ android {
             // make debug APK installable side-by-side with release builds
             applicationIdSuffix ".debug"
             debuggable true
+            // Explicit debug signing configuration
+            signingConfig signingConfigs.debug
         }
 
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // TODO: Add signing config when ready for production
+            // signingConfig signingConfigs.release
+        }
+    }
+    
+    signingConfigs {
+        debug {
+            // Default Android debug keystore location
+            def keystoreFile = file(System.getProperty('user.home') + '/.android/debug.keystore')
+            if (keystoreFile.exists()) {
+                storeFile keystoreFile
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            } else {
+                logger.warn("Debug keystore not found at: " + keystoreFile)
+                logger.warn("Android SDK will create default debug keystore on first build")
+            }
         }
     }
 }

@@ -213,29 +213,51 @@ export interface LicenseData {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
-export interface PrinterConfig {
-  ip: string
-  port: number
-  enabled: boolean
-}
-
-export interface PrinterProfile {
-  id: string
-  name: string
-  role: 'cashier' | 'kitchen'
-  ip: string
-  port: number
-  enabled: boolean
-}
-
 export interface AppSettings {
   restaurantName: string
   currency: string
   taxRate: number
   receiptFooter: string
-  receiptPrinter: PrinterConfig
-  kitchenPrinter: PrinterConfig
   kitchenStations: string[]   // e.g. ['Kitchen', 'Bar']
-  printerProfiles: PrinterProfile[]
-  stationPrinterMap: Record<string, string>
+}
+
+// ─── Printer ──────────────────────────────────────────────────────────────────
+
+export type PrinterConnectionType = 'bluetooth' | 'network' | 'usb'
+
+export interface PrinterConfig {
+  id: string
+  name: string
+  type: PrinterConnectionType
+  /** Network/IP printer */
+  ipAddress?: string
+  port?: number            // default 9100
+  /** Bluetooth printer */
+  macAddress?: string
+  /** USB printer (Android OTG) */
+  deviceId?: string
+  /** Common */
+  isActive: boolean
+  paperWidth?: number      // 58 (384 dots) or 80 (576 dots), default 58
+  /** Printer model features */
+  supportsCutter?: boolean
+  supportsDrawer?: boolean
+}
+
+export interface PrinterProfile {
+  id: string
+  name: string
+  printerId: string
+  /** Which kitchen station this profile prints (e.g. 'Kitchen', 'Bar') */
+  station?: string
+  copies: number
+  autoCut: boolean
+  openDrawer: boolean
+}
+
+/** Maps kitchen stations to printer profiles */
+export interface StationPrinterMap {
+  station: string
+  printerId: string
+  profileId?: string
 }
